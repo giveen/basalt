@@ -202,10 +202,17 @@ CpuTopology detect_cpu_topology(bool skip_first, CpuAffinity affinity) {
         all_cpus.push_back(cl);
     }
 
-    topo.is_hybrid = (max_cap > 0 && max_cap > min_cap);
+    // The capacities of one core class are not equal: the OS reports each core's own, and the top frequency step of
+    // the class is only reached by some of them (979 against 1024 for the rest of the same class on one CPU).  A class
+    // is therefore a band, not an exact value: everything above the midpoint between the extremes is the fast class and
+    // the rest is the slow one.  Comparing against the maximum exactly made the fast cores that sat one step below it
+    // count as slow-class alike, and the pool was then sized to one worker.
+    const long mid_cap = (max_cap + min_cap) / 2;
+    const bool cap_gap = max_cap > 0 && (long long) max_cap * 10 > (long long) min_cap * 11;
+    topo.is_hybrid = cap_gap;
     if (topo.is_hybrid) {
         for (const auto& cl : all_cpus) {
-            if (cl.cap == max_cap) {
+            if (cl.cap > mid_cap) {
                 if (!cl.is_sibling) topo.p_cores++;
                 topo.p_threads++;
             } else {
@@ -237,7 +244,7 @@ CpuTopology detect_cpu_topology(bool skip_first, CpuAffinity affinity) {
     std::vector<int> e_cores;
 
     for (const auto& cl : all_cpus) {
-        if (cl.cap == max_cap) {
+        if (cl.cap > mid_cap) {
             if (!cl.is_sibling) p_primaries.push_back(cl.cpu);
             else p_siblings.push_back(cl.cpu);
         } else {
