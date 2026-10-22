@@ -377,4 +377,7 @@ def build_parser() -> argparse.ArgumentParser:
                         help=f"default {key.replace('-', '_')} for requests that leave it out, over the model file's: {text}")
     ap.add_argument("--min-free-vram-mib", type=int, default=None,
                     help="load an unloaded model only when this much VRAM is free, else answer 503")
+    ap.add_argument("--reasoning-budget-tokens", type=int, default=None, metavar="N",
+                    help="default thinking budget for requests that leave reasoning_budget_tokens out (0 = none): at "
+                         "the budget the thinking is closed and the answer starts")
     return ap

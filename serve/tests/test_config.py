@@ -243,6 +243,19 @@ class SamplingOptions(unittest.TestCase):
                          "[server] sampling defaults: temperature=0.8 (command line), top_k=20 (config), top_p=0.9")
 
 
+class ThinkingBudget(unittest.TestCase):
+    """reasoning-budget-tokens is the launch default for the request field of the same name."""
+
+    def test_the_command_line_and_the_config_file(self):
+        a, _, _, cli_words = parse(["--reasoning-budget-tokens", "3072"])
+        self.assertEqual((a.reasoning_budget_tokens, cli_words), (3072, []))
+        a = parse([], {"server": {"reasoning_budget_tokens": 64}})[0]
+        self.assertEqual(a.reasoning_budget_tokens, 64)
+
+    def test_left_out_the_request_decides(self):
+        self.assertIsNone(parse([])[0].reasoning_budget_tokens)
+
+
 class SlotContext(unittest.TestCase):
     """--max-context is shared by the --parallel slots unless --slot-full-context."""
 
