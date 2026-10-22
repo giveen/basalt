@@ -136,8 +136,7 @@ static bool topology_respects_current_mask() {
 
 // The fast-class count against the OS's own numbers: one capacity per PHYSICAL core (a sibling shares its core's), the
 // fast class being the cores above the midpoint between the extremes.  Reading the capacities here rather than trusting
-// the topology is the point - a class whose cores do not all sit at the maximum (one core reports the top frequency
-// step and its neighbours the step below) must still be one class.
+// the topology is the point - a class whose cores do not all sit at the maximum must still be one class.
 static bool topology_core_classes() {
     auto read = [](const std::string& path) -> long {
         long v = -1;
