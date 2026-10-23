@@ -13,7 +13,21 @@ import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from serve.config import build_parser, check_engine_flags, engine_flags_of, engine_line, load_config_file, parallel_count, parse_settings, SAMPLING_KEYS, sampling_defaults_from_config, sampling_line, server_options, split_engine_extras  # noqa: E402
+from serve.config import (  # noqa: E402
+    SAMPLING_KEYS,
+    budget_count,
+    build_parser,
+    check_engine_flags,
+    engine_flags_of,
+    engine_line,
+    load_config_file,
+    parallel_count,
+    parse_settings,
+    sampling_defaults_from_config,
+    sampling_line,
+    server_options,
+    split_engine_extras,
+)
 from serve.engine.flags import flag_value  # noqa: E402
 from serve.security import exposed_without_key  # noqa: E402
 
@@ -244,16 +258,16 @@ class SamplingOptions(unittest.TestCase):
 
 
 class ThinkingBudget(unittest.TestCase):
-    """reasoning-budget-tokens is the launch default for the request field of the same name."""
-
-    def test_the_command_line_and_the_config_file(self):
-        a, _, _, cli_words = parse(["--reasoning-budget-tokens", "3072"])
-        self.assertEqual((a.reasoning_budget_tokens, cli_words), (3072, []))
-        a = parse([], {"server": {"reasoning_budget_tokens": 64}})[0]
-        self.assertEqual(a.reasoning_budget_tokens, 64)
+    """reasoning-budget-tokens is the launch default for the request field of the same name; the field itself and
+    what a budget does to a reply are covered in test_server's ThinkingBudget (Service level)."""
 
     def test_left_out_the_request_decides(self):
         self.assertIsNone(parse([])[0].reasoning_budget_tokens)
+
+    def test_a_bad_budget_is_refused(self):
+        for bad in ("-1", "-3072", "lots", "1.5", ""):
+            with self.subTest(value=bad), self.assertRaises(SystemExit):
+                parse(["--reasoning-budget-tokens", bad])
 
 
 class SlotContext(unittest.TestCase):
@@ -301,7 +315,7 @@ class EveryOption(unittest.TestCase):
             return True
         if act.choices:
             return [c for c in act.choices][-1]
-        if act.type is int or act.type is parallel_count:
+        if act.type is int or act.type is parallel_count or act.type is budget_count:
             return 7
         if act.type is float:
             return 0.25
