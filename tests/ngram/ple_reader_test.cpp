@@ -1,4 +1,4 @@
-// src/ngram/ple_reader_test.cpp - the direct SSD row reader against ground truth.
+// tests/ngram/ple_reader_test.cpp - the direct SSD row reader against ground truth.
 //
 //   ple_reader_test --selftest [--dir D]        synthetic table file; CPU and disk only, no model, no GPU
 //   ple_reader_test --gguf SHARD2 [--rows N]    the real table: Direct vs Mmap bytes for N random rows (+ the

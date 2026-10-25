@@ -1,4 +1,4 @@
-// src/kernels/q6k_vhead_parity.cpp - the two-stage verify head (q6k_vhead) against q6k_head_mmvq and a CPU reference,
+// tests/kernels/q6k_vhead_parity.cpp - the two-stage verify head (q6k_vhead) against q6k_head_mmvq and a CPU reference,
 // on random Q6_K rows scaled to a head's logit spread and quantized random columns, 1..8 columns:
 //   - the copy: a CPU fit of the dequantized rows gives the same levels and scales (a few boundary levels may differ
 //     under fast math);

@@ -1,4 +1,4 @@
-// src/kernels/s_gemv_q8k_parity.cpp - the Q8_K activation path of `s_gemv`.
+// tests/kernels/s_gemv_q8k_parity.cpp - the Q8_K activation path of `s_gemv`.
 //
 // THE POINT OF THIS KERNEL IS A CONTRACT, so the test is built around the contract rather than around the
 // arithmetic:

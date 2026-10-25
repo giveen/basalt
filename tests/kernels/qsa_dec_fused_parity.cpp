@@ -1,4 +1,4 @@
-// src/kernels/qsa_dec_fused_parity.cpp - qsa_dec_kv_post / qsa_dec_q_post against the separate kernels the verify
+// tests/kernels/qsa_dec_fused_parity.cpp - qsa_dec_kv_post / qsa_dec_q_post against the separate kernels the verify
 // window ran (norm, RoPE, tail copy, INT8 appends with a host copy, indexer appends; q split, norms, RoPEs), bitwise,
 // for windows of 1..8 rows at every block phase; then a microbench of both forms.
 //   qsa_dec_fused_parity [iters]

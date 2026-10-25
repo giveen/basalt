@@ -1,4 +1,4 @@
-// src/kernels/kv_stream_parity.cpp - KV streaming (kv_stream.hpp) against a fully resident pool (GPU, no model).
+// tests/kernels/kv_stream_parity.cpp - KV streaming (kv_stream.hpp) against a fully resident pool (GPU, no model).
 //
 // Decodes a synthetic sequence twice: into a fully resident pool with the identity page table, and into a streamed
 // layer (host copy + a small VRAM slot pool that must evict constantly). Every few cells a batch of 1-8 queries

@@ -1,4 +1,4 @@
-// src/kernels/dec_commit_parity.cpp - DEC_COMMIT's two launches against the commit graph's per-layer calls.
+// tests/kernels/dec_commit_parity.cpp - DEC_COMMIT's two launches against the commit graph's per-layer calls.
 //
 //     build/dec_commit_parity [--bench | --finisher [--bench] | --lazy [--bench]]
 //

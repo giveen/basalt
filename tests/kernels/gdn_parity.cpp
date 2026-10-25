@@ -1,4 +1,4 @@
-// src/kernels/gdn_parity.cpp - test for the GDN recurrence, the conv and the two norms.
+// tests/kernels/gdn_parity.cpp - test for the GDN recurrence, the conv and the two norms.
 //
 // The Python reference carries eleven PROPERTY checks, several of which exist because a rival reading of the SOURCE
 // produces well-formed output.  The four that the kernels here can be wrong about are re-pinned below, each

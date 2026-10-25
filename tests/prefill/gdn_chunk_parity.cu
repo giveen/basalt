@@ -1,4 +1,4 @@
-// src/prefill/gdn_chunk_parity.cu - the prompt path's chunked DeltaNet recurrence (gdn_recurrence,
+// tests/prefill/gdn_chunk_parity.cu - the prompt path's chunked DeltaNet recurrence (gdn_recurrence,
 // src/prefill/gdn_chunked.cu) against the token-serial FP32 kernel it replaced and a double-precision CPU reference.
 //
 // Synthetic inputs of the model's shape (16 key heads, 48 value heads, head size 128, q/k not yet normalized), a

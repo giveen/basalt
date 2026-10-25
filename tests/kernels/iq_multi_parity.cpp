@@ -1,4 +1,4 @@
-// src/kernels/iq_multi_parity.cpp - the IQ kernels that decode each weight part once for every
+// tests/kernels/iq_multi_parity.cpp - the IQ kernels that decode each weight part once for every
 // column / entry, against the older kernels that decode it again per column.  Synthetic blocks, no model.
 //
 //     build/iq_multi_parity            the checks (a ctest; needs the GPU)

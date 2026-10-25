@@ -1,4 +1,4 @@
-// src/kernels/cvec_parity.cpp - the control vector kernel (basalt/kernels/cvec.hpp) against a host reference.
+// tests/kernels/cvec_parity.cpp - the control vector kernel (basalt/kernels/cvec.hpp) against a host reference.
 //   1. project: h - s (h.v) v per stream and token, against double precision; the steered component is gone.
 //   2. add: h + d.
 //   3. switched off: R unchanged without a pending write; with one, R is BITWISE the write the fused read folds

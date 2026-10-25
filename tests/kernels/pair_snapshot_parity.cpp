@@ -1,4 +1,4 @@
-// src/kernels/pair_snapshot_parity.cpp - the kernels behind the overlapped windows' snapshot and hand-off.
+// tests/kernels/pair_snapshot_parity.cpp - the kernels behind the overlapped windows' snapshot and hand-off.
 //
 //     build/pair_snapshot_parity [--bench]
 //

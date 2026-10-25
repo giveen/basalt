@@ -1,4 +1,4 @@
-// src/program/tokenizer/tokenizer_bench.cpp - cold and warm encode time of the C++ tokenizer on text files.
+// tests/program/tokenizer_bench.cpp - cold and warm encode time of the C++ tokenizer on text files.
 // usage: tokenizer_bench <pack tokenizer dir> <text file>...   (each file is encoded in a fresh tokenizer, then again)
 #include <chrono>
 #include <cstdio>

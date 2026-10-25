@@ -1,4 +1,4 @@
-// src/kernels/dense_tc_parity.cpp - dense_tc (DEC_DTC) against native_mmvq, and its column contract.
+// tests/kernels/dense_tc_parity.cpp - dense_tc (DEC_DTC) against native_mmvq, and its column contract.
 //
 //     build/dense_tc_parity [--bench]
 //

@@ -1,4 +1,4 @@
-// src/kernels/qsa_parity.cpp - test for the QSA cache, indexer, selection and attention.
+// tests/kernels/qsa_parity.cpp - test for the QSA cache, indexer, selection and attention.
 //
 // The Python reference carries eleven PROPERTY checks and is the layer as the model runs it.  The
 // readings a prose transcription gets WRONG, each of which produces a well-formed result of the right shape,

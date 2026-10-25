@@ -1,4 +1,4 @@
-// src/spec/suffix_drafter_test.cpp - suffix-lookup drafter tests and an offline simulation.
+// tests/spec/suffix_drafter_test.cpp - suffix-lookup drafter tests and an offline simulation.
 //
 //   suffix_drafter_test                      unit tests
 //   suffix_drafter_test --simulate [--k K] FILE.ids ...

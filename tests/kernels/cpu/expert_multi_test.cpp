@@ -1,4 +1,4 @@
-// src/kernels/cpu/expert_multi_test.cpp - one expert, several tokens (CPU only, synthetic data).
+// tests/kernels/cpu/expert_multi_test.cpp - one expert, several tokens (CPU only, synthetic data).
 //
 //   expert_multi_test              bitwise check: s2_expert_vnni_multi vs s2_expert_vnni_q per token, n = 1..8
 //   expert_multi_test --bench [E]  time per expert for n = 1..5 over E synthetic experts (default 256 = 354 MB,

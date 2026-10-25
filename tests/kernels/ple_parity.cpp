@@ -1,4 +1,4 @@
-// src/kernels/ple_parity.cpp - test: the n-gram hash, the IQ4_NL table read, and the PLE block.
+// tests/kernels/ple_parity.cpp - test: the n-gram hash, the IQ4_NL table read, and the PLE block.
 //
 // THREE PARTS, THREE DIFFERENT ORACLES, and none of them is this project's own code:
 //

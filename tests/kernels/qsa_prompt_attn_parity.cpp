@@ -1,4 +1,4 @@
-// src/kernels/qsa_prompt_attn_parity.cpp - the tensor-core prompt attention (qsa_prompt_attn.hpp)
+// tests/kernels/qsa_prompt_attn_parity.cpp - the tensor-core prompt attention (qsa_prompt_attn.hpp)
 // against the FP32 kernel it replaces (`qsa_decode_attn_batch`) and an FP64 host reference (GPU, synthetic, no model).
 //
 // Int8, FP16 and Q4_0 pools with random codes, scales and queries; selections shaped like the prompt path's (the 2,051

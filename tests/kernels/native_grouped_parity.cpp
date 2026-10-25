@@ -1,4 +1,4 @@
-// src/kernels/native_grouped_parity.cpp - native_expert_grouped's group stride (grid_groups) and its fused SwiGLU +
+// tests/kernels/native_grouped_parity.cpp - native_expert_grouped's group stride (grid_groups) and its fused SwiGLU +
 // q8_1 pass, against the launches before them (native_grouped_set_v1: a block row per possible group, SwiGLU and the
 // q8_1 quantization as two kernels over all cap_entries).  Synthetic blobs, no model.
 //

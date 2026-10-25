@@ -1,4 +1,4 @@
-// src/kernels/pk_moe_bench.cpp - the MoE half of one decode layer (hc read 2 with the router, routed experts, shared
+// tests/kernels/pk_moe_bench.cpp - the MoE half of one decode layer (hc read 2 with the router, routed experts, shared
 // expert, combine) as the engine launches it, against the persistent experts kernel (pk_moe.hpp): bitwise equality
 // of the layer output and time per layer, over a pool of layers so no layer's weights are in L2 when it runs.
 // Synthetic weights in the model's formats (random bytes are valid codes; only the fp16 block scales are set); all

@@ -1,4 +1,4 @@
-// src/kernels/qsa_seg_parity.cpp - the segment variants of the QSA decode chain (qsa_seg.hpp) against the
+// tests/kernels/qsa_seg_parity.cpp - the segment variants of the QSA decode chain (qsa_seg.hpp) against the
 // single-sequence kernels run per slot, bitwise: K/V post + indexer appends, query post, block scores, top-k, chunk
 // attention + merge (+ gate and q8_1 rows), and the commit (tail restore + appends), for S in {1,2,5,8} segments of
 // mixed row counts at different positions, segment order shuffled against slot order; INT8 and FP16 pools; then a

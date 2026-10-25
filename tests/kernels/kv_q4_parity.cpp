@@ -1,4 +1,4 @@
-// src/kernels/kv_q4_parity.cpp - Parity test for Q4_0 KV cache with orthonormal Walsh-Hadamard rotation.
+// tests/kernels/kv_q4_parity.cpp - Parity test for Q4_0 KV cache with orthonormal Walsh-Hadamard rotation.
 // Validates:
 // 1. FWHT 256 CUDA kernel vs exact mathematical orthonormal Walsh-Hadamard transform.
 //    (H * H * x == x, H is symmetric and orthonormal with scale 1/sqrt(256) = 1/16).

@@ -1,4 +1,4 @@
-// src/kernels/dequant_s2_parity.cpp - parity test for the S2 decode.
+// tests/kernels/dequant_s2_parity.cpp - parity test for the S2 decode.
 //
 // THE REFERENCE IS THE CHAIN, NOT A SECOND OPINION.  `basalt::dequantize_q2_0` (include/basalt/artifact/
 // dequant.hpp) is a scalar transcription that is checked against **ggml's own**

@@ -1,4 +1,4 @@
-// src/kernels/dec_gdn_parity.cpp - the verify window's GDN block around dec_gdn_rec against the per-stage verify
+// tests/kernels/dec_gdn_parity.cpp - the verify window's GDN block around dec_gdn_rec against the per-stage verify
 // kernels, bitwise.
 //
 //     build/dec_gdn_parity [--bench | --bench-only]

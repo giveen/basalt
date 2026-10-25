@@ -1,4 +1,4 @@
-// src/kernels/hc_fused_parity.cpp - hc_fused_read against the kernels it replaces (fused_gr_read_multi on the 8-bit
+// tests/kernels/hc_fused_parity.cpp - hc_fused_read against the kernels it replaces (fused_gr_read_multi on the 8-bit
 // copies, then the MMVF router GEMV and the native top-10), with real geometry and random inputs.  The fused read
 // has its own reduction order and fast exponentials, so against those kernels each output must agree within
 // kRelTol of its largest value and pick the same experts; against itself it must be bitwise: repeated launches,

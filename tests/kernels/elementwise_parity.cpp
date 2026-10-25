@@ -1,4 +1,4 @@
-// src/kernels/elementwise_parity.cpp - test for the layer glue.
+// tests/kernels/elementwise_parity.cpp - test for the layer glue.
 //
 // The ops are small; the CONVENTIONS in them are not, and each one is a place where a plausible reading
 // gives a plausible number:

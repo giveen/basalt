@@ -1,4 +1,4 @@
-// src/kernels/cpu/iq_avx2_test.cpp - the AVX2 i-quant rows: the `madd`+`add` build against the AVX-VNNI build, and both
+// tests/kernels/cpu/iq_avx2_test.cpp - the AVX2 i-quant rows: the `madd`+`add` build against the AVX-VNNI build, and both
 // against a plain double-precision reference.
 //
 //     build/iq_avx2_test [--bench]

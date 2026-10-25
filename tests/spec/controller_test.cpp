@@ -1,4 +1,4 @@
-// src/spec/controller_test.cpp - the speculation controller's decisions (no model, no GPU).
+// tests/spec/controller_test.cpp - the speculation controller's decisions (no model, no GPU).
 #include "basalt/spec/controller.hpp"
 
 #include <cstdio>

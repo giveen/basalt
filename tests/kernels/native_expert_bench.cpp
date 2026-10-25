@@ -1,4 +1,4 @@
-// src/kernels/native_expert_bench.cpp - the grouped native experts on real GGUF rows: one kernel layout against
+// tests/kernels/native_expert_bench.cpp - the grouped native experts on real GGUF rows: one kernel layout against
 // another, bit for bit, and each one's time.
 //
 //     build/native_expert_bench <shard1.gguf> <layer[,layer...]> <groups> <tokens per group> <ref mode> <mode> [iters]

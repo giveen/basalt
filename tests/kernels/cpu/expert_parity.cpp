@@ -1,4 +1,4 @@
-// src/kernels/cpu/expert_parity.cpp - test for the CPU expert path.
+// tests/kernels/cpu/expert_parity.cpp - test for the CPU expert path.
 //
 // WHAT IS BEING CHECKED, and the two tolerances are different questions:
 //

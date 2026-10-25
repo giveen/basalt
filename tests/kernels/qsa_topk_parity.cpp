@@ -1,4 +1,4 @@
-// src/kernels/qsa_topk_parity.cpp - the QSA top-k the engine dispatches (qsa_block_topk) against the original kernel
+// tests/kernels/qsa_topk_parity.cpp - the QSA top-k the engine dispatches (qsa_block_topk) against the original kernel
 // (qsa_block_topk_ref): the selected cells must be identical (GPU, synthetic, no model).
 //
 // A case is a context under a capacity (the engine's --max-context; max_blocks = capacity / 4 + 2, and without an

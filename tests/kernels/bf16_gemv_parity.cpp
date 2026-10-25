@@ -1,4 +1,4 @@
-// src/kernels/bf16_gemv_parity.cpp - test for the BF16 GEMV.
+// tests/kernels/bf16_gemv_parity.cpp - test for the BF16 GEMV.
 //
 // THREE THINGS ARE CHECKED, and the third is the one the engine's correctness rests on:
 //

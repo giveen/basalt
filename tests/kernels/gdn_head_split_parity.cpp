@@ -1,4 +1,4 @@
-// src/kernels/gdn_head_split_parity.cpp - a GDN layer split by key-head group across two cards against the whole
+// tests/kernels/gdn_head_split_parity.cpp - a GDN layer split by key-head group across two cards against the whole
 // layer on one card and a CPU reference.
 //
 //     build/gdn_head_split_parity [--bench]

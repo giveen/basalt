@@ -1,4 +1,4 @@
-// src/vision/cpu_parity.cpp - the CPU encoder against tensors saved from a reference run.
+// tests/vision/cpu_parity.cpp - the CPU encoder against tensors saved from a reference run.
 //
 //   vision_cpu_parity <mmproj.gguf> <image> <reference dir> [threads] [bf16]
 //

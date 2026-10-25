@@ -1,4 +1,4 @@
-// src/kernels/rope_parity.cpp - parity test for NEOX partial RoPE.
+// tests/kernels/rope_parity.cpp - parity test for NEOX partial RoPE.
 //
 // TWO CHECKS, deliberately separated so each can be tight:
 //

@@ -1,4 +1,4 @@
-// src/platform/memory_test.cpp - lock_resident on 256 MiB (or what the locked-memory limit allows), the RAM floor, the
+// tests/platform/memory_test.cpp - lock_resident on 256 MiB (or what the locked-memory limit allows), the RAM floor, the
 // file cache decisions and the read-ahead hint on a mapped file view (CPU only, no GPU, no model; one temp file).
 #include "basalt/platform/memory.hpp"
 

@@ -1,4 +1,4 @@
-// src/kernels/kv_q8_parity.cpp - INT8 KV append/gather against a host reference (GPU, no model).
+// tests/kernels/kv_q8_parity.cpp - INT8 KV append/gather against a host reference (GPU, no model).
 //
 // Appends random K/V cells at scattered positions through a non-identity page table into both the INT8 pools
 // (kv_append_q8_step) and the FP16 pools (kv_append_step), gathers random cell sets from both, and checks:

@@ -1,4 +1,4 @@
-// src/kernels/gr_parity.cpp - test for the gated residual / hyper-connection.
+// tests/kernels/gr_parity.cpp - test for the gated residual / hyper-connection.
 //
 // The Python reference opens by listing the details "a prose reading gets wrong", and every one of them is a reading
 // that has the RIGHT SHAPES and produces a PLAUSIBLE number.  So each is computed here the wrong way round and

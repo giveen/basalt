@@ -1,4 +1,4 @@
-// src/kernels/s2_expert_grouped_parity.cpp - the rewritten expert kernels against the previous ones,
+// tests/kernels/s2_expert_grouped_parity.cpp - the rewritten expert kernels against the previous ones,
 // BITWISE (GPU, synthetic, no model).
 //
 //     build/s2_expert_grouped_parity            the checks below; exit 1 on any difference

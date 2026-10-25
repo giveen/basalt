@@ -1,4 +1,4 @@
-// src/kernels/decode_cluster_parity.cpp - the decode kernels on thread-block clusters against the ones
+// tests/kernels/decode_cluster_parity.cpp - the decode kernels on thread-block clusters against the ones
 // they replace, bit for bit (GPU, synthetic, no model).
 //
 //   QSA top-k : qsa_block_topk_cluster vs qsa_block_topk_ref -

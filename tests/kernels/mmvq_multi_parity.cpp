@@ -1,4 +1,4 @@
-// src/kernels/mmvq_multi_parity.cpp - the multi_exact contract of native_mmvq, tested bitwise.
+// tests/kernels/mmvq_multi_parity.cpp - the multi_exact contract of native_mmvq, tested bitwise.
 //
 //     build/mmvq_multi_parity
 //

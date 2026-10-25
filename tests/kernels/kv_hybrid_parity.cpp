@@ -1,4 +1,4 @@
-// src/kernels/kv_hybrid_parity.cpp - hybrid K8V4 KV against host references (GPU, no model).
+// tests/kernels/kv_hybrid_parity.cpp - hybrid K8V4 KV against host references (GPU, no model).
 //
 // Exercises the EXACT composed calls the engine's hybrid path makes (layer.cpp / prefill.cpp): the q8/q4
 // append and gather kernels invoked with the unused half's pointers folded onto the used pool, and the

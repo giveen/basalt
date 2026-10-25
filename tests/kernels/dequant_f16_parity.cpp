@@ -1,4 +1,4 @@
-// src/kernels/dequant_f16_parity.cpp - the device dequantizers' FP16 output on random blocks of the dense weight
+// tests/kernels/dequant_f16_parity.cpp - the device dequantizers' FP16 output on random blocks of the dense weight
 // types: bitwise against the FP32 path rounded to half, against the artifact's CPU dequantizers, and a microbench
 // line (us per call, GB/s over the bytes read and written).
 //

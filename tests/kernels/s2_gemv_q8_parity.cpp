@@ -1,4 +1,4 @@
-// src/kernels/s2_gemv_q8_parity.cpp - the Q8_0-activation GEMV, and the size of the gap it closes.
+// tests/kernels/s2_gemv_q8_parity.cpp - the Q8_0-activation GEMV, and the size of the gap it closes.
 //
 // THREE CHECKS:
 //   1. The quantized-activation GEMV matches a host reference that quantizes the activation exactly as

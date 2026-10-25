@@ -1,4 +1,4 @@
-// src/kernels/router_top10_parity.cpp - parity test for the MoE router.
+// tests/kernels/router_top10_parity.cpp - parity test for the MoE router.
 //
 // The reference here is a HOST implementation of the Python reference written from the same specification the
 // kernel was written from - so this checks the kernel against the spec independently of the kernel, which is

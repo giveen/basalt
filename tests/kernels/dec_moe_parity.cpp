@@ -1,4 +1,4 @@
-// src/kernels/dec_moe_parity.cpp - DEC_MOE's kernels on real GGUF experts against the path they replace.
+// tests/kernels/dec_moe_parity.cpp - DEC_MOE's kernels on real GGUF experts against the path they replace.
 //
 //     build/dec_moe_parity <shard1.gguf> [layer,layer,...] [--bench | --stress N]
 //     build/dec_moe_parity --nvfp4 [--bench | --stress N]   (synthetic NVFP4 experts with their scale tail, no GGUF)

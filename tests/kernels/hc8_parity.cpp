@@ -1,4 +1,4 @@
-// src/kernels/hc8_parity.cpp - the reads and products that take a hyper-connection matrix held only as its 8-bit copy
+// tests/kernels/hc8_parity.cpp - the reads and products that take a hyper-connection matrix held only as its 8-bit copy
 // (DEC_HC8, hc_fused.hpp's hc8_adopt), real geometry and random inputs (GPU, synthetic, no model):
 //
 //   1. hc8_gr_read_multi (what fused_gr_read, fused_gr_read_multi and gr_read run for such matrices) against

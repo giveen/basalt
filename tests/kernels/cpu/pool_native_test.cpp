@@ -1,4 +1,4 @@
-// src/kernels/cpu/pool_native_test.cpp - the pool's multi-token native path against a serial reference.
+// tests/kernels/cpu/pool_native_test.cpp - the pool's multi-token native path against a serial reference.
 //
 //     build/pool_native_test [--bench]
 //

@@ -1,4 +1,4 @@
-// src/kernels/s2_gemv_parity.cpp - parity test for the S2 GEMV.
+// tests/kernels/s2_gemv_parity.cpp - parity test for the S2 GEMV.
 //
 // The reference is the same CHAIN as the decode test: `basalt::dequantize_q2_0` is a scalar transcription that
 // that is checked against **ggml's own** dequantizer, so comparing the GPU GEMV against a

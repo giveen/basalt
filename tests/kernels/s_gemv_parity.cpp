@@ -1,4 +1,4 @@
-// src/kernels/s_gemv_parity.cpp - parity test for the S-family GEMV.
+// tests/kernels/s_gemv_parity.cpp - parity test for the S-family GEMV.
 //
 // Four source types, chosen to cover every branch the kernel has:
 //

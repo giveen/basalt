@@ -1,4 +1,4 @@
-// src/kernels/qsa_scores_parity.cpp - the decode indexer (block scores, then the cluster top-k): the scores bitwise against
+// tests/kernels/qsa_scores_parity.cpp - the decode indexer (block scores, then the cluster top-k): the scores bitwise against
 // the per-block reference kernel and within double-precision error of a CPU reference, at the real indexer geometry (tails
 // with and without cells, windows of 1..8 rows), for the single-sequence and the segment entry points; the selection
 // identical to the reference top-k on continuous, tied and equal scores; then a microbench line per kernel with the keys

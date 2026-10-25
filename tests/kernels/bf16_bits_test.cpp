@@ -1,4 +1,4 @@
-// src/kernels/bf16_bits_test.cpp - `bf16_bits.hpp` against ggml's rule, over EVERY f32 bit pattern (CPU only).
+// tests/kernels/bf16_bits_test.cpp - `bf16_bits.hpp` against ggml's rule, over EVERY f32 bit pattern (CPU only).
 //
 // the rounding add `i + 0x7FFF + bit16` carries out of the mantissa for a NaN, so 0x7FFFFFFF came back as
 // -0 and 0x7F800001 as +inf - an upstream NaN was masked instead of propagated.  `ggml_compute_fp32_to_bf16`

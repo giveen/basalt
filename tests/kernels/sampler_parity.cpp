@@ -1,4 +1,4 @@
-// src/kernels/sampler_parity.cpp - the test for the sampler chain.
+// tests/kernels/sampler_parity.cpp - the test for the sampler chain.
 //
 // THE CHECK THAT MATTERS IS THAT THE ORDER IS OBSERVABLE.  A sampler in the wrong order still returns a valid token, so
 // "it produced a token" proves nothing; and because temperature is MONOTONIC it does not change which tokens `top_k`

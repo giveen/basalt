@@ -1,4 +1,4 @@
-// src/artifact/gguf_reader_test.cpp - the reader refuses what it cannot arbitrate (synthetic GGUF, no model,
+// tests/artifact/gguf_reader_test.cpp - the reader refuses what it cannot arbitrate (synthetic GGUF, no model,
 // no GPU).
 //
 //   1. two tensors with distinct names: the file opens and find() sees both;

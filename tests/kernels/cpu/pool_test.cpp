@@ -1,4 +1,4 @@
-// src/kernels/cpu/pool_test.cpp - test for the expert pool.
+// tests/kernels/cpu/pool_test.cpp - test for the expert pool.
 //
 // The pool's correctness claims are small and specific, so they are checked directly rather than through a
 // timing number:

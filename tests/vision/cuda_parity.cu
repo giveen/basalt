@@ -1,4 +1,4 @@
-// src/vision/cuda_parity.cu - the encoder's kernels against host references, a microbench line for each, and the
+// tests/vision/cuda_parity.cu - the encoder's kernels against host references, a microbench line for each, and the
 // whole CUDA encoder against the CPU encoder on an image.
 //
 //   vision_cuda_parity kernels

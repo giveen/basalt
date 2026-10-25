@@ -1,4 +1,4 @@
-// src/program/conv_cache_test.cpp - the conversation cache's retention policy: the shared root survives,
+// tests/program/conv_cache_test.cpp - the conversation cache's retention policy: the shared root survives,
 // the leaves rotate by least recent use.
 //
 // The scenarios, in the serve loop's terms (generate.cpp): checkpoints are a prefix chain - stamps[0] is

@@ -1,4 +1,4 @@
-// src/spec/draft_policy_test.cpp - DraftPolicy: when does a lookup window beat the MTP's?
+// tests/spec/draft_policy_test.cpp - DraftPolicy: when does a lookup window beat the MTP's?
 //
 // Simulated rounds with measured window costs (about 10 ms more per token) check that
 //   1. with no lookup proposal the MTP window is kept;

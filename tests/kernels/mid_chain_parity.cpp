@@ -1,4 +1,4 @@
-// src/kernels/mid_chain_parity.cpp - mid_chain against the kernels it replaces (dense_tc_pair, dec_gdn_rec, dense_tc), bit
+// tests/kernels/mid_chain_parity.cpp - mid_chain against the kernels it replaces (dense_tc_pair, dec_gdn_rec, dense_tc), bit
 // for bit on every output, between the first hc read and the second one with the router (so the whole chain, under
 // programmatic dependent launch, is compared), with real geometry, random inputs and every projection-type triple of the
 // packs, the recurrence's q8_1 output aliasing the read's rows as the engine has it and apart; a token's outputs must not

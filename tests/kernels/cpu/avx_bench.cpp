@@ -1,4 +1,4 @@
-// src/kernels/cpu/avx_bench.cpp - the CPU expert kernels on each instruction set side by side, at the decode geometry.
+// tests/kernels/cpu/avx_bench.cpp - the CPU expert kernels on each instruction set side by side, at the decode geometry.
 //
 //     build/avx_bench [tokens] [threads] [experts] [reps]
 //

@@ -1,4 +1,4 @@
-// src/kernels/qsa_dec_attn_parity.cpp - qsa_dec_attn against qsa_decode_attn_batch (+ native_qsa_gate_apply), bitwise,
+// tests/kernels/qsa_dec_attn_parity.cpp - qsa_dec_attn against qsa_decode_attn_batch (+ native_qsa_gate_apply), bitwise,
 // on random INT8 and FP16 pools through a permuted page table with masked pages; then a microbench of both.
 //   qsa_dec_attn_parity [iters]
 #include "basalt/kernels/native_mmvq.hpp"

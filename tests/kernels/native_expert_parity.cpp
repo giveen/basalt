@@ -1,4 +1,4 @@
-// src/kernels/native_expert_parity.cpp - one native expert three ways.
+// tests/kernels/native_expert_parity.cpp - one native expert three ways.
 //
 //     build/native_expert_parity <shard.gguf> [layer ...]     real rows (a split model's shards are found by name)
 //     build/native_expert_parity --synthetic GU/DOWN ...      random weights quantized by ggml (e.g. q4_K/q5_1)

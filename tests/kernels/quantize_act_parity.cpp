@@ -1,4 +1,4 @@
-// src/kernels/quantize_act_parity.cpp - parity test for the Q8_0 activation quantizer.
+// tests/kernels/quantize_act_parity.cpp - parity test for the Q8_0 activation quantizer.
 //
 // THE CHECK IS ON THE BYTES, not on the round-tripped values.  the central finding is that
 // dividing by the fp16-rounded scale instead of the fp32 one changed 18 of 80 blocks' quantized integers

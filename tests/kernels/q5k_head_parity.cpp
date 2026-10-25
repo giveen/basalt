@@ -1,4 +1,4 @@
-// src/kernels/q5k_head_parity.cpp - q5k_head_mmvq against native_mmvq (Q5_K, the exact layout), bitwise, on random
+// tests/kernels/q5k_head_parity.cpp - q5k_head_mmvq against native_mmvq (Q5_K, the exact layout), bitwise, on random
 // Q5_K rows and quantized random columns, 1..8 columns; then a microbench of both at the head's shape.
 //   q5k_head_parity [rows] [iters]
 #include "basalt/kernels/native_mmvq.hpp"

@@ -1,4 +1,4 @@
-// src/kernels/dm_table_put_parity.cpp - the peer table update by kernel, against the copy it replaces.
+// tests/kernels/dm_table_put_parity.cpp - the peer table update by kernel, against the copy it replaces.
 //
 //     build/dm_table_put_parity [--bench]
 //

@@ -1,4 +1,4 @@
-// src/kernels/ple_win_parity.cpp - native_ple_window against the verify window's per-row chain (native_gr_post,
+// tests/kernels/ple_win_parity.cpp - native_ple_window against the verify window's per-row chain (native_gr_post,
 // ple_block_projected, ple_history_advance, the history copy), bitwise, for windows of 1..7 rows; then both forms
 // captured as graphs and timed at T = 1..4.
 //   ple_win_parity [iters]

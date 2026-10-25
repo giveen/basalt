@@ -1,4 +1,4 @@
-// src/kernels/cpu/pool_stress.cpp - the expert pool under the load a big-VRAM card gives it.
+// tests/kernels/cpu/pool_stress.cpp - the expert pool under the load a big-VRAM card gives it.
 //
 // With most experts resident on the GPU, many layers hand the pool nothing, the workers go to sleep in the middle
 // of a request, and the next tiny batch (one or two experts) is often finished by the host and the awake workers

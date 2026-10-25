@@ -1,4 +1,4 @@
-// src/kernels/shared_expert_parity.cpp - test for the shared expert.
+// tests/kernels/shared_expert_parity.cpp - test for the shared expert.
 //
 // WHAT THIS CAN AND CANNOT CHECK TIGHTLY.  The weights are driven with FP16 activations because Q8_K is not
 // implemented, and the SwiGLU intermediate is converted to fp16 before the down projection - so the tolerance
