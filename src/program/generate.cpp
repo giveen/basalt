@@ -4220,37 +4220,16 @@ int main(int argc, char** argv) {
             }
         basalt::prefill::Prefill::set_pinned_share(total ? (double) pinned / (double) total : 1.0);
     }
-    // bytes -> slots for one cache: exact when it knows its per-slot offsets (a native pack's blobs differ
-    // per layer), otherwise max_blob each.
-    // `lend_bytes` went with the single-cache serve loan: a participant's loan is priced by `part_bytes` from its
-    // OWN cache, and the only other user of the old helper was the serve path's own relayout.
-    // The prompt path's chunk and the slots it borrows for its buffers: the requested chunk halved until it fits, or
-    // with --prefill auto the largest chunk whose buffers take at most kAutoLendPct % of the slots (a lent slot's
-    // expert is streamed during the prompt and refilled after it).  A request lends only what its own prompt needs
-    // (Prefill::relayout), so a big chunk costs short prompts nothing.  0 = none fits.
-    // At large chunks nearly every expert streams anyway, so a lent slot costs little: 90% when the copies are DMA
-    // from pinned RAM, 85% when host copies are the limit (lending more only streams more through them).
-    // Hoisted out of plan_lend: the serve path's per-stage loans obey the same cap, one participant at a time.
+    // The share of a cache a lent prompt chunk may take: 90% when the copies are DMA from pinned RAM, 85% when host
+    // copies are the limit (lending more only streams more through them).
     const int64_t kAutoLendPct = basalt::prefill::Prefill::pinned_share() >= 0.9 ? 90 : 85;
     // The largest chunk --prefill auto may pick: the operator's ceiling (--prefill auto:N) and never past the context,
     // but never below 8192.  A bare `auto` is cut back once the RAM complement is built (below) to what the lend can
     // fund, and again to the fewest-equal-chunks cap when a prompt is read; without the resident RAM mode there is no
     // complement to size it from, so it stays at 8192.
-    // The largest chunk a bare `auto` reads a prompt in: past it a chunk's cost per token stops falling.
-    // A pass streams every expert blob once, so a pack with bigger blobs amortizes the pass over more tokens.
-    constexpr int64_t kHeadChunk = 16384;   // the first chunk of a prompt above the chunk cap
     const int64_t kMaxAutoChunk = basalt::kernels::cpu::expert_layout().max_blob > (3u << 19) ? 32768 : 16384;
-    // How one card reads a part of `tokens` in chunks of at most `cap`: equal chunks for the fewest chunks (every chunk
-    // streams the experts, so a short tail costs a whole stream), and a long part starts with a short chunk (`head_ok`):
-    // the first chunk waits for its PLE rows before layer 1 with nothing to overlap, so a short one shrinks that wait.
-    // The chunk, and the head chunk (0: none).
-    // the sizes of a part's chunks
     int64_t auto_ceiling = std::max<int64_t>(8192, std::min<int64_t>(o.prefill_auto_max, o.max_context));
     if (o.prefill_auto_fit && !o.resident_cpu_experts) auto_ceiling = 8192;
-    // The auto scan bisects on the 256-token grid the prompt path works on (`request_chunk` rounds up to it):
-    // `bytes_needed` is a sum of (T x positive constant) terms plus a max of such sums, so it rises monotonically
-    // with T, and so does every test the scan applies - the largest size that fits is a bisection, one `bytes_needed`
-    // per probe.
     // The peer tier's fill.  `exclusive` (--peer-exclusive): done before the RAM complement, which then leaves the
     // peer's experts out, so they are read from the file here and held only on the peer.
     auto open_peer = [&](bool exclusive) -> bool {

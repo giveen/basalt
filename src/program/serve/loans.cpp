@@ -1,4 +1,4 @@
-// basalt/program/serve/loans.cpp - see loans.hpp.  Moved out of generate.cpp's serve section unchanged.
+// basalt/program/serve/loans.cpp - see loans.hpp.
 #include "loans.hpp"
 
 #include <algorithm>
@@ -65,7 +65,9 @@ int64_t plan_lend(int64_t& chunk, const basalt::core::ExpertCache& xc, const bas
                   const basalt::core::SessionState& ss, bool prefill_auto, int64_t auto_ceiling, int auto_lend_pct) {
     const auto slots_for = [&](int64_t cells) { return lend_slots(xc, g, ss, cells); };
     if (prefill_auto) {
-        // the largest chunk on the 256-token grid whose buffers fit the lend caps
+        // The scan bisects on the 256-token grid `request_chunk` rounds to: `bytes_needed` is a sum of (T x positive
+        // constant) terms plus a max of such sums, so it rises monotonically with T and so does every test below.
+
         const int64_t c = basalt::program::engine_local::biggest_chunk(auto_ceiling, [&](int64_t t) -> bool {
             const int64_t k = slots_for(t);
             return k + 128 <= xc.slots() && k * 100 <= auto_lend_pct * xc.slots();

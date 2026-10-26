@@ -1,9 +1,8 @@
 // basalt/program/serve/loans.hpp - the prompt path's chunk sizes and the expert-cache slots it borrows.
 //
 // The prompt path lends the tail of the expert cache to its own buffers, so a chunk is sized by what the cache can
-// spare: `bytes_needed` for a chunk of T tokens, rounded up to whole blobs, against the slots left.  These are the
-// rules both the CLI path and the server apply, with no state of their own - they take the cache, the geometry and
-// the session as arguments so they can be tested without an engine.
+// spare: `bytes_needed` for a chunk of T tokens, rounded up to whole blobs, against the slots left.  The cache, the
+// geometry and the session arrive as arguments; nothing here reads or holds engine state.
 #pragma once
 
 #include <cstdint>

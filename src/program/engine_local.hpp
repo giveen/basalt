@@ -1,7 +1,8 @@
-// basalt/program/engine_local.hpp - helpers shared by generate.cpp and the serve engine's translation unit.
+// basalt/program/engine_local.hpp - program-level helpers and shapes used by more than one translation unit.
 // Private to src/program: nothing here is part of the engine's public surface.
 #pragma once
 
+#include <atomic>
 #include <cstdint>
 #include <cstdio>
 #include <condition_variable>
