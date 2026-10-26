@@ -82,15 +82,7 @@ private:
     int64_t layer_;
 };
 
-/// Every shape the kernels depend on, asserted for ONE layer.  Returns false and fills `err` with the first
-/// mismatch, naming the tensor, what it has and what is required.
-///
-/// This is deliberately a separate function from `LayerView`: a caller that only wants the pointers should
-/// not pay for the checks, and a caller that wants the checks should get ALL of them rather than the ones
-/// its own call site happens to touch.
-bool check_layer(const WeightTable& table, const ModelGeometry& g, int64_t layer, std::string& err);
-
-/// `check_layer` over every layer, plus the cross-layer properties: exactly 12 QSA layers at the right
+/// The per-layer check over every layer, plus the cross-layer properties: exactly 12 QSA layers at the right
 /// indices, every GDN layer having the GDN set and no QSA tensor, and vice versa.  Returns the first failure.
 bool check_all(const WeightTable& table, const ModelGeometry& g, std::string& err);
 

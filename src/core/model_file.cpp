@@ -93,17 +93,6 @@ const Json* Json::get(const std::string& key) const {
     return it == members.end() ? nullptr : &it->second;
 }
 
-double Json::num() const {
-    if (type == Type::Float) return f;
-    if (type == Type::Int) return neg ? -(double) u : (double) u;
-    return 0.0;
-}
-
-int64_t Json::i64() const {
-    if (type == Type::Float) return (int64_t) f;
-    return neg ? -(int64_t) u : (int64_t) u;
-}
-
 namespace {
 
 struct JsonParser {

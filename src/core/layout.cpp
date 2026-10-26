@@ -138,14 +138,6 @@ std::string LayerView::name(const char* suffix) const {
     return "blk." + std::to_string(layer_) + "." + suffix;
 }
 
-bool check_layer(const WeightTable& table, const ModelGeometry& g, int64_t layer, std::string& err) {
-    if (layer < 0 || layer >= g.n_layers) {
-        err = "layer " + std::to_string(layer) + " is outside 0.." + std::to_string(g.n_layers - 1);
-        return false;
-    }
-    return check_one(table, g, layer, err);
-}
-
 bool check_all(const WeightTable& table, const ModelGeometry& g, std::string& err) {
     int64_t n_qsa = 0, n_gdn = 0;
     for (int64_t l = 0; l < g.n_layers; ++l) {

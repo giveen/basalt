@@ -30,8 +30,6 @@ struct NativeFmt {
     size_t act_bytes = 0, h_bytes = 0;  ///< quantized activation sizes (n_embd of gu_act, n_ff of d_act)
 };
 
-/// Whether this build has the ggml dot-product path.
-bool native_experts_available() noexcept;
 /// Fills `f` for a layer; false (with a reason) when there is no dot product for a type.
 bool native_fmt(int gu_type, int d_type, int64_t n_embd, int64_t n_ff, NativeFmt& f, std::string& err);
 

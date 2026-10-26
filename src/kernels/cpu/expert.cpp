@@ -56,18 +56,6 @@ inline __m256i unpack_q2_0(const uint8_t* codes) {
     return _mm256_and_si256(_mm256_multishift_epi64_epi8(ctrl, lanes), _mm256_set1_epi8(3));
 }
 
-/// 32 codes against 32 int8 activations. Codes 0 contribute nothing to `sum(c*xhat)`, so the zero lanes the
-/// narrow load leaves behind are harmless.
-inline __m256i block_dot(const uint8_t* codes, const int8_t* xq) {
-    return _mm256_dpbusd_epi32(_mm256_setzero_si256(), unpack_q2_0(codes),
-                               _mm256_load_si256((const __m256i*) xq));
-}
-
-inline float hsum_ps(__m256 v) {
-    const __m128 s = _mm_add_ps(_mm256_castps256_ps128(v), _mm256_extractf128_ps(v, 1));
-    return _mm_cvtss_f32(_mm_hadd_ps(_mm_hadd_ps(s, s), s));
-}
-
 // ================================ the row dot in 512-bit lanes ================================
 //
 // A block is ONE unpack (16 code bytes -> 64 codes), ONE VNNI dot over 64 activations, ONE convert and ONE FMA whose

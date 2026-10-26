@@ -23,8 +23,6 @@ const ggml_type_traits_cpu* traits(int type) { return ggml_get_type_traits_cpu((
 
 }  // namespace
 
-bool native_experts_available() noexcept { return true; }
-
 bool native_fmt(int gu_type, int d_type, int64_t n_embd, int64_t n_ff, NativeFmt& f, std::string& err) {
     const ggml_type_traits_cpu* tg = traits(gu_type);
     const ggml_type_traits_cpu* td = traits(d_type);

@@ -1523,8 +1523,6 @@ Verifier::~Verifier() {
         if (h) cudaFreeHost(h);
 }
 
-bool hc8_table_has(const std::string& name, int rows, int cols) { return basalt::core::hc8_find(name, rows, cols) != nullptr; }
-
 const void* hc8_table_adopt(const std::string& name, const uint16_t* w, int rows, int cols) {
     const Hc8Copy* c = hc8_find(name, rows, cols);
     if (c == nullptr) return nullptr;

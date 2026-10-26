@@ -65,10 +65,6 @@ constexpr int GGML_Q8_0 = 8;
 using Clock = std::chrono::steady_clock;
 double ms_since(Clock::time_point t) { return std::chrono::duration<double, std::milli>(Clock::now() - t).count(); }
 
-// The round and chain graphs run independent branches on a second stream (the embedding beside the hidden input,
-// K/V beside Q, the shared expert beside the routed ones, the next step's hidden input beside the head); the same
-// kernels on the same inputs, so the same bits.
-constexpr bool dec_draft_par() { return true; }
 // Every hyper-connection read of those graphs (and the MLP read's router) as the one-kernel read, whose bits are
 // fused_gr_read_multi's.
 bool dec_draft_hcf() {

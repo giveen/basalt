@@ -71,8 +71,6 @@ struct Json {
     bool is_number() const { return type == Type::Int || type == Type::Float; }
     /// A member of an object, or nullptr.
     const Json* get(const std::string& key) const;
-    double num() const;
-    int64_t i64() const;
     uint64_t u64() const { return u; }
 };
 
