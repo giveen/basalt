@@ -7,6 +7,7 @@
 // on the same ids on both sides.
 
 #include "engine_local.hpp"
+#include "serve/loans.hpp"
 #include "basalt/program/options.hpp"
 #include "basalt/core/load_progress.hpp"
 #include "basalt/core/logit_bias.hpp"
@@ -266,6 +267,7 @@ constexpr float kRelaxedDraftingDefault = 0.5f;   // --relaxed-drafting without 
 
 using basalt::program::Options;
 namespace engine_local = basalt::program::engine_local;
+namespace serve_loans = basalt::program::serve;
 using engine_local::Drive;
 using engine_local::GpuStage;
 using engine_local::JobRunner;
@@ -4220,29 +4222,8 @@ int main(int argc, char** argv) {
     }
     // bytes -> slots for one cache: exact when it knows its per-slot offsets (a native pack's blobs differ
     // per layer), otherwise max_blob each.
-    auto cache_slots_for = [&](const basalt::core::ExpertCache& xc, uint64_t need) -> int64_t {
-        if (xc.slot_offsets() != nullptr) {   // sized slots: from the end until they hold `need`
-            int64_t k = 0;
-            while (k < xc.slots() &&
-                   (uint64_t) (xc.bytes() - (int64_t) xc.slot_offsets()[xc.slots() - k]) < need) ++k;
-            return k;
-        }
-        const int64_t blob = (int64_t) basalt::kernels::cpu::expert_layout().max_blob;
-        return (int64_t) ((need + (uint64_t) blob - 1) / (uint64_t) blob);
-    };
-    auto slots_from_bytes = [&](uint64_t need) -> int64_t { return cache_slots_for(xcache, need); };
-    auto lend_slots = [&](int64_t c) -> int64_t {
-        return slots_from_bytes(basalt::prefill::Prefill::bytes_needed(g, ss, c));
-    };
     // `lend_bytes` went with the single-cache serve loan: a participant's loan is priced by `part_bytes` from its
     // OWN cache, and the only other user of the old helper was the serve path's own relayout.
-    auto request_chunk = [](int64_t tokens, int64_t max_chunk) -> int64_t {
-        if (tokens <= 0 || max_chunk <= 0) return 0;
-        const int64_t rounded = tokens > std::numeric_limits<int64_t>::max() - 255
-                                    ? tokens
-                                    : ((tokens + 255) / 256) * 256;
-        return std::min(max_chunk, rounded);
-    };
     // The prompt path's chunk and the slots it borrows for its buffers: the requested chunk halved until it fits, or
     // with --prefill auto the largest chunk whose buffers take at most kAutoLendPct % of the slots (a lent slot's
     // expert is streamed during the prompt and refilled after it).  A request lends only what its own prompt needs
@@ -4263,53 +4244,13 @@ int main(int argc, char** argv) {
     // streams the experts, so a short tail costs a whole stream), and a long part starts with a short chunk (`head_ok`):
     // the first chunk waits for its PLE rows before layer 1 with nothing to overlap, so a short one shrinks that wait.
     // The chunk, and the head chunk (0: none).
-    auto one_card_chunks = [&](int64_t tokens, int64_t cap, bool head_ok) -> std::pair<int64_t, int64_t> {
-        int64_t want = request_chunk(tokens, cap);
-        if (want > 0 && tokens > cap) {
-            const int64_t parts = (tokens + cap - 1) / cap;
-            want = request_chunk((tokens + parts - 1) / parts, cap);
-        }
-        int64_t head = 0;
-        if (head_ok && o.prefill_auto_fit && tokens > cap && tokens >= 2 * kHeadChunk && cap > kHeadChunk) {
-            const int64_t rem = tokens - kHeadChunk, parts = (rem + cap - 1) / cap;
-            want = request_chunk((rem + parts - 1) / parts, cap);
-            head = kHeadChunk;
-        }
-        return {want, head};
-    };
     // the sizes of a part's chunks
-    auto chunk_list = [](int64_t tokens, int64_t chunk, int64_t head) {
-        std::vector<int64_t> v;
-        for (int64_t at = 0; chunk > 0 && at < tokens;) {
-            const int64_t T = std::min(at == 0 && head > 0 ? head : chunk, tokens - at);
-            v.push_back(T);
-            at += T;
-        }
-        return v;
-    };
     int64_t auto_ceiling = std::max<int64_t>(8192, std::min<int64_t>(o.prefill_auto_max, o.max_context));
     if (o.prefill_auto_fit && !o.resident_cpu_experts) auto_ceiling = 8192;
     // The auto scan bisects on the 256-token grid the prompt path works on (`request_chunk` rounds up to it):
     // `bytes_needed` is a sum of (T x positive constant) terms plus a max of such sums, so it rises monotonically
     // with T, and so does every test the scan applies - the largest size that fits is a bisection, one `bytes_needed`
     // per probe.
-    auto plan_lend = [&](int64_t& chunk) -> int64_t {
-        auto slots_for = lend_slots;
-        if (o.prefill_auto) {
-            // the largest chunk on the 256-token grid whose buffers fit the lend caps
-            const int64_t c = engine_local::biggest_chunk(auto_ceiling, [&](int64_t t) -> bool {
-                const int64_t k = slots_for(t);
-                return k + 128 <= xcache.slots() && k * 100 <= kAutoLendPct * xcache.slots();
-            });
-            if (c > 0) { chunk = c; return slots_for(c); }
-            return 0;
-        }
-        for (int64_t c = chunk; c >= 256; c /= 2) {
-            const int64_t k = slots_for(c);
-            if (k + 128 <= xcache.slots()) { chunk = c; return k; }
-        }
-        return 0;
-    };
     // The peer tier's fill.  `exclusive` (--peer-exclusive): done before the RAM complement, which then leaves the
     // peer's experts out, so they are read from the file here and held only on the peer.
     auto open_peer = [&](bool exclusive) -> bool {
@@ -4405,7 +4346,8 @@ int main(int argc, char** argv) {
     int64_t lend_chunk = o.prefill_chunk;
     if (o.prefill_chunk > 0 && d_res != nullptr && xcache.slots() > 0) {
         int64_t chunk = o.prefill_chunk;
-        const int64_t k = plan_lend(chunk);
+        const int64_t k = serve_loans::plan_lend(chunk, xcache, g, ss, o.prefill_auto, auto_ceiling,
+                                                (int) kAutoLendPct);
         if (k > 0) { lend_from = xcache.slots() - k; lend_chunk = chunk; }
     }
     // a layer split: the stages' caches are GPU tiers the RAM copy leaves out, except each one's last slots, which the
@@ -4414,7 +4356,7 @@ int main(int argc, char** argv) {
     uint64_t stage_lent_bytes = 0;
     for (const auto& stp : stages) {
         const int64_t first = lend_from >= 0
-            ? stp->cache.slots() - cache_slots_for(stp->cache, basalt::prefill::Prefill::bytes_needed(g, stp->ss, lend_chunk))
+            ? stp->cache.slots() - serve_loans::cache_slots_for(stp->cache, basalt::prefill::Prefill::bytes_needed(g, stp->ss, lend_chunk))
             : stp->cache.slots();
         for (const auto& pr : stp->profile) {
             const int32_t slot = stp->cache.slot_of(pr.first, pr.second);
@@ -4604,7 +4546,7 @@ int main(int argc, char** argv) {
             const int64_t allow = std::max<int64_t>(0, src.resident_lent_slots() - kv_tail_slots) +
                                   (int64_t) (2 * basalt::platform::kPromptFileReadBytes / std::max<uint64_t>(1, basalt::kernels::cpu::expert_layout().max_blob));
             auto_ceiling = std::max<int64_t>(8192, engine_local::biggest_chunk(std::min<int64_t>(auto_ceiling, kMaxAutoChunk),
-                                                                 [&](int64_t t) { return lend_slots(t) <= allow; }));
+                                                                 [&](int64_t t) { return serve_loans::lend_slots(xcache, g, ss, t) <= allow; }));
         }
         if (resident_ok) {
             if (o.serve) basalt::platform::watch_resident_ram(true, src.resident_bytes());
@@ -4699,7 +4641,7 @@ int main(int argc, char** argv) {
         c.mem_gbps = chosen_cards.empty() ? 0 : chosen_cards[0].mem_gbps;
         c.link_gbps = main_link_gbps;
         c.stream_bytes.assign((size_t) g.n_layers, 0.0);
-        const int64_t first = xcache.slots() - cache_slots_for(xcache, basalt::prefill::Prefill::bytes_needed(g, ss, chunk));
+        const int64_t first = xcache.slots() - serve_loans::cache_slots_for(xcache, basalt::prefill::Prefill::bytes_needed(g, ss, chunk));
         for (int64_t l = 0; l < g.n_layers; ++l)
             for (int64_t e = 0; e < g.n_expert; ++e) {
                 const int32_t r = host_res.empty() ? -1 : host_res[(size_t) (l * g.n_expert + e)];
@@ -4714,7 +4656,7 @@ int main(int argc, char** argv) {
         c.link_gbps = st.link_gbps;
         c.stream_bytes.assign((size_t) g.n_layers, 0.0);
         const basalt::core::ExpertCache& pc = st.tier->cache();
-        const int64_t first = pc.slots() - cache_slots_for(pc, region);
+        const int64_t first = pc.slots() - serve_loans::cache_slots_for(pc, region);
         const std::vector<int32_t>& r = st.tier->residency();
         for (int64_t l = 0; l < g.n_layers; ++l)
             for (int64_t e = 0; e < g.n_expert; ++e) {
@@ -4730,13 +4672,13 @@ int main(int argc, char** argv) {
         const int64_t n_tok = b0 - a0;
         // two chunks or more, the draft layer's window within the last two the main card hands on (their final rows
         // come back for it in the hand-off buffers)
-        const auto [chunk, head] = one_card_chunks(n_tok, read_cap(), true);
+        const auto [chunk, head] = serve_loans::one_card_chunks(n_tok, read_cap(), true, o.prefill_auto_fit);
         if (chunk < 4096 || n_tok <= std::max(chunk, head) || 2 * chunk < draft_window) return sp0;
         sp0.chunk = chunk;
         sp0.head = head;
         basalt::program::PsPart part;
         part.cell0 = a0;
-        part.tier_chunks = chunk_list(n_tok, chunk, head);
+        part.tier_chunks = serve_loans::chunk_list(n_tok, chunk, head);
         part.split_chunks = part.tier_chunks;
         part.row_bytes = (uint64_t) (g.hc * g.n_embd) * sizeof(float);
         const int64_t c_last = b0 - part.split_chunks.back();
@@ -4871,7 +4813,7 @@ int main(int argc, char** argv) {
         const basalt::core::ExpertCache& pc = st.tier->cache();
         uint8_t* base = const_cast<uint8_t*>(pc.device_slot(0));
         uint8_t* w_at = (uint8_t*) ((uintptr_t) (base + pc.bytes() - st.image_bytes) & ~(uintptr_t) 255);
-        const int64_t k = cache_slots_for(pc, (uint64_t) (base + pc.bytes() - w_at));
+        const int64_t k = serve_loans::cache_slots_for(pc, (uint64_t) (base + pc.bytes() - w_at));
         bool ok = k > 0 && k < pc.slots() / 2 && st.tier->lend((int32_t) (pc.slots() - k), st.lent, err) &&
                   st.wt.load(pack_files, w_at, st.pool, err, &st.skip, false);
         if (ok) {
@@ -4981,7 +4923,7 @@ int main(int argc, char** argv) {
             std::vector<std::pair<int32_t, int32_t>> lent;
         };
         auto part_slots = [&](const PfPart& p, int64_t c) -> int64_t {
-            return cache_slots_for(*p.cache, basalt::prefill::Prefill::bytes_needed(g, *p.ses, c));
+            return serve_loans::cache_slots_for(*p.cache, basalt::prefill::Prefill::bytes_needed(g, *p.ses, c));
         };
         auto part_bytes = [&](const PfPart& p, int32_t first) -> uint64_t {
             basalt::core::ExpertCache& xc = *p.cache;
@@ -7144,7 +7086,7 @@ int main(int argc, char** argv) {
             if (cudaDeviceSynchronize() != cudaSuccess) { reply_err(std::string("device: ") + cudaGetErrorString(cudaGetLastError())); return; }
             PfPart& p = pf_parts[0];
             if (!p.lent.empty()) { reply_err("a prompt's loan is still out"); return; }
-            const int64_t k = cache_slots_for(*p.cache, vis_enc.arena_bytes(tokens));
+            const int64_t k = serve_loans::cache_slots_for(*p.cache, vis_enc.arena_bytes(tokens));
             // the room: the cache's tail down to the first slot whose expert has no RAM copy to refill it from (never
             // less than the prompt path's loan region, which always has one)
             auto lendable = [&]() -> int64_t {
@@ -8728,7 +8670,8 @@ int main(int argc, char** argv) {
                     }));
                     cap = std::min(cap, lc);
                 }
-                auto [want_full, head_tok] = one_card_chunks(tokens, cap, !beside && stages.empty());
+                auto [want_full, head_tok] = serve_loans::one_card_chunks(tokens, cap, !beside && stages.empty(),
+                                                                       o.prefill_auto_fit);
                 if (chunk > 0) {
                     want_full = chunk;
                     head_tok = head;
@@ -8920,7 +8863,7 @@ int main(int argc, char** argv) {
                         return false;
                     }
                     uint8_t* base = const_cast<uint8_t*>(pc.device_slot(0));
-                    st.lent_slots = cache_slots_for(pc, (uint64_t) (base + pc.bytes() - b_at));
+                    st.lent_slots = serve_loans::cache_slots_for(pc, (uint64_t) (base + pc.bytes() - b_at));
                     const int32_t first = (int32_t) (pc.slots() - st.lent_slots);
                     if (!st.tier->lend(first, st.lent, e)) {
                         give_back_all();
@@ -10430,16 +10373,17 @@ int main(int argc, char** argv) {
         uint64_t borrow_bytes = 0;
         if (!host_res.empty() && d_res != nullptr) {
             int64_t chunk = o.prefill_chunk;
-            int64_t k = plan_lend(chunk);             // auto: the largest chunk that fits; fixed: halved to fit
-            const int64_t request_sized = request_chunk(n_batched, chunk);
+            int64_t k = serve_loans::plan_lend(chunk, xcache, g, ss, o.prefill_auto, auto_ceiling,
+                                               (int) kAutoLendPct);   // auto: the largest that fits; fixed: halved
+            const int64_t request_sized = serve_loans::request_chunk(n_batched, chunk);
             if (k > 0 && request_sized < chunk) {                     // no bigger than this prompt segment needs
                 chunk = request_sized;
-                k = lend_slots(chunk);
+                k = serve_loans::lend_slots(xcache, g, ss, chunk);
                 if (k + 128 > xcache.slots()) k = 0;
                 if (!o.prefill_auto) o.prefill_chunk = chunk;
             }
             if (o.prefill_auto) {
-                o.prefill_chunk = k > 0 ? chunk : request_chunk(n_batched, 1024);
+                o.prefill_chunk = k > 0 ? chunk : serve_loans::request_chunk(n_batched, 1024);
                 basalt::log::info("basalt generate", "prompt chunk auto: %lld tokens", (long long) o.prefill_chunk);
             } else if (chunk != o.prefill_chunk) {
                 k = 0;                                 // a fixed chunk that does not fit: its own buffers, as before
