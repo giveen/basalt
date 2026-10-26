@@ -6,6 +6,7 @@
 // There is no tokenizer here: the prompt arrives as ids via `--tokens`, so a logit comparison against a reference runs
 // on the same ids on both sides.
 
+#include "engine_local.hpp"
 #include "basalt/program/options.hpp"
 #include "basalt/core/load_progress.hpp"
 #include "basalt/core/logit_bias.hpp"
@@ -323,6 +324,7 @@ bool resident_spare_swaps(basalt::core::FileExpertSource& src, const std::vector
 constexpr float kRelaxedDraftingDefault = 0.5f;   // --relaxed-drafting without a value
 
 using basalt::program::Options;
+namespace engine_local = basalt::program::engine_local;
 
 
 /// Calls `f` with the tensor name of every row of a pack index (the first field of each non-comment line).
@@ -4420,20 +4422,11 @@ int main(int argc, char** argv) {
     // `bytes_needed` is a sum of (T x positive constant) terms plus a max of such sums, so it rises monotonically
     // with T, and so does every test the scan applies - the largest size that fits is a bisection, one `bytes_needed`
     // per probe.
-    auto biggest_chunk = [](int64_t ceiling, auto&& ok) -> int64_t {
-        if (ceiling < 256) return 0;
-        int64_t lo = 1, hi = ceiling / 256, best = 0;   // n = T / 256, and ok() is monotone in n
-        while (lo <= hi) {
-            const int64_t mid = lo + (hi - lo) / 2;
-            if (ok(mid * 256)) { best = mid * 256; lo = mid + 1; } else hi = mid - 1;
-        }
-        return best;
-    };
     auto plan_lend = [&](int64_t& chunk) -> int64_t {
         auto slots_for = lend_slots;
         if (o.prefill_auto) {
             // the largest chunk on the 256-token grid whose buffers fit the lend caps
-            const int64_t c = biggest_chunk(auto_ceiling, [&](int64_t t) -> bool {
+            const int64_t c = engine_local::biggest_chunk(auto_ceiling, [&](int64_t t) -> bool {
                 const int64_t k = slots_for(t);
                 return k + 128 <= xcache.slots() && k * 100 <= kAutoLendPct * xcache.slots();
             });
@@ -4739,7 +4732,7 @@ int main(int argc, char** argv) {
             // (kMaxAutoChunk) bounds the chunk, so the ceiling stops there too.
             const int64_t allow = std::max<int64_t>(0, src.resident_lent_slots() - kv_tail_slots) +
                                   (int64_t) (2 * basalt::platform::kPromptFileReadBytes / std::max<uint64_t>(1, basalt::kernels::cpu::expert_layout().max_blob));
-            auto_ceiling = std::max<int64_t>(8192, biggest_chunk(std::min<int64_t>(auto_ceiling, kMaxAutoChunk),
+            auto_ceiling = std::max<int64_t>(8192, engine_local::biggest_chunk(std::min<int64_t>(auto_ceiling, kMaxAutoChunk),
                                                                  [&](int64_t t) { return lend_slots(t) <= allow; }));
         }
         if (resident_ok) {
@@ -4861,9 +4854,8 @@ int main(int argc, char** argv) {
     };
     // a part [a0, b0) of a prompt ending at `prompt_end` over up to `max_stages` stages, each stage with its weights'
     // layers [lo, hi) and image bytes: both prices, and the split's chunk and head chunk
-    struct SplitPricing { basalt::program::PsPrice price; int64_t chunk = 0, head = 0; };
-    auto split_price = [&](int64_t a0, int64_t b0, int64_t prompt_end, int max_stages) -> SplitPricing {
-        SplitPricing sp0;
+    auto split_price = [&](int64_t a0, int64_t b0, int64_t prompt_end, int max_stages) -> engine_local::SplitPricing {
+        engine_local::SplitPricing sp0;
         const int64_t n_tok = b0 - a0;
         // two chunks or more, the draft layer's window within the last two the main card hands on (their final rows
         // come back for it in the hand-off buffers)
@@ -4934,8 +4926,8 @@ int main(int argc, char** argv) {
             st->hi = g.n_layers;
             st->image_bytes = ok ? image_from(g.n_layers / 2) : 0;
         }
-        const SplitPricing ref_all = ok ? split_price(0, longest, longest, all) : SplitPricing{};
-        const SplitPricing ref = ok && split_cap >= 2 && split_cap < all ? split_price(0, longest, longest, split_cap) : ref_all;
+        const engine_local::SplitPricing ref_all = ok ? split_price(0, longest, longest, all) : engine_local::SplitPricing{};
+        const engine_local::SplitPricing ref = ok && split_cap >= 2 && split_cap < all ? split_price(0, longest, longest, split_cap) : ref_all;
         for (auto& st : pstages) st->lo = st->hi = 0, st->image_bytes = 0;
         if (!ok) {
             basalt::log::info("basalt generate", "prompt split: off (its weights' sizes: %s)", err.c_str());
@@ -5165,7 +5157,7 @@ int main(int argc, char** argv) {
                 }
                 // the largest chunk on the 256-token grid that `only` - or, with null, every stage - can lend, under
                 // the operator's ceiling (auto_ceiling keeps a bare `auto` at 8192)
-                return biggest_chunk(auto_ceiling, [&](int64_t t) -> bool { return fits(t, true, only); });
+                return engine_local::biggest_chunk(auto_ceiling, [&](int64_t t) -> bool { return fits(t, true, only); });
             };
             const int64_t chunk = scan(nullptr);
             // A small card in a layer split caps every stage's chunk.  Named when it bites, so the regression is one
@@ -6831,7 +6823,7 @@ int main(int argc, char** argv) {
             // of chunk, not half of it
             int64_t c = chunk_full;
             if (o.prefill_auto && !fits(c)) {
-                c = biggest_chunk(chunk_full, fits);
+                c = engine_local::biggest_chunk(chunk_full, fits);
                 if (c == 0) c = 256;
             }
             while (c > 256 && !fits(c)) c = std::max<int64_t>(256, c / 2 / 256 * 256);
@@ -8860,7 +8852,7 @@ int main(int argc, char** argv) {
                                                                                      (xcache.full_slots() - xcache.slots())));
                 }
                 if (loan_lim != std::numeric_limits<int64_t>::max() && !pf_parts.empty() && pf_parts[0].first >= 0) {
-                    const int64_t lc = std::max<int64_t>(256, biggest_chunk(cap, [&](int64_t t) {
+                    const int64_t lc = std::max<int64_t>(256, engine_local::biggest_chunk(cap, [&](int64_t t) {
                         return part_slots(pf_parts[0], t) <= loan_lim;
                     }));
                     cap = std::min(cap, lc);
@@ -8977,7 +8969,7 @@ int main(int argc, char** argv) {
             auto split_plan = [&](int64_t a0, int64_t b0) -> SplitPlan {
                 SplitPlan plan;
                 if (!split_ready || batch_on() || !req_imgs.empty()) return plan;
-                const SplitPricing pr = split_price(a0, b0, n - 1, split_stages);
+                const engine_local::SplitPricing pr = split_price(a0, b0, n - 1, split_stages);
                 if (pr.chunk <= 0 || pr.chunk > split_chunk_max || pr.price.stages < 2) return plan;
                 basalt::log::info("basalt serve", "prompt split: %lld tokens priced %.0f ms on CUDA0, %.0f ms with %s%s; read %s",
                                   (long long) (b0 - a0), pr.price.tier_ms, pr.price.split_ms,
