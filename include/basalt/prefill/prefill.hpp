@@ -164,6 +164,9 @@ public:
     /// T x hc*n_embd, valid until the next chunk) and the chunk's first position; the MTP draft layer builds its
     /// K/V from them.  The prefill stream is synchronized before the call.
     std::function<bool(const float* R_rows, int64_t T, int64_t pos0, std::string& err)> on_chunk;
+    /// The chunk's most recent completed layer features, averaged over residual streams.
+    void set_taps(const std::vector<int>& layers) { tap_layers_ = layers; }
+    std::function<bool(const float*, int64_t, int64_t, std::string&)> on_taps;
 
     /// Called on the host before each layer of a chunk with the layers done so far, the layer count, the chunk's
     /// length and first position.  No device work is added; the MoE layers' routing readback keeps the host in step
@@ -209,6 +212,8 @@ public:
 
 
 private:
+    std::vector<int> tap_layers_;
+    float* tap_dev_ = nullptr;
     // Stage-1 pipeline: intermediate stages return after handing their chunk to
     // the direct successor. The public run() drains the chain once at prompt end.
     bool run_impl(const int64_t* tokens, int64_t n, int64_t pos0, std::string& err);

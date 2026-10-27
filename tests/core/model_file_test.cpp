@@ -89,13 +89,18 @@ int main() {
         "# experts v5: layer gu_type d_type offset blob_bytes (n_expert 2, total 0)\n";
 
     const std::string path = write_model(d.path / "m.basalt", {{"meta", meta}, {"gguf", gg}, {"hc8", hc8_bytes},
-                                                                {"experts.layout", layout}});
+                                                                {"experts.layout", layout}, {"dflash2/model", "BF16 weights"},
+                                                                {"dflash2/config", "{}"}});
     std::printf("1. the table\n");
     ModelFile m;
     check(m.open(path, err), "open: " + err);
     check(m.find("gguf") != nullptr && m.find("nothing") == nullptr, "find");
     check(m.range("gguf").offset % kSectionAlign == 0 && m.range("gguf").bytes == gg.size(), "a section is aligned and sized");
     check(m.range("nothing").empty(), "an absent section is an empty range");
+    ModelSources sources;
+    model_sources(m, sources);
+    check(sources.dflash2_model.bytes == 12 && sources.dflash2_config.bytes == 2 && sources.mtp_dense.empty(),
+          "DFlash2 section ranges are separate from MTP");
     std::vector<uint8_t> raw;
     check(m.read("gguf", raw, err) && raw.size() == gg.size() && raw[5] == 5, "read a section");
     {

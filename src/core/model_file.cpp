@@ -423,6 +423,8 @@ void model_sources(const ModelFile& m, ModelSources& s) {
     s.mtp_dense_index = m.range("mtp/dense.index");
     s.mtp_experts = m.range("mtp/experts");
     s.mtp_draft_vocab = m.range("mtp/draft_vocab");
+    s.dflash2_model = m.range("dflash2/model");
+    s.dflash2_config = m.range("dflash2/config");
     s.model_path = m.path();
 }
 

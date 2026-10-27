@@ -116,6 +116,7 @@ private:
 struct ModelSources {
     FileRange dense, dense_index, experts, experts_layout, profile, hc8;
     FileRange mtp_dense, mtp_dense_index, mtp_experts, mtp_draft_vocab;
+    FileRange dflash2_model, dflash2_config;
     /// The file that serves the source GGUF tensors and metadata when they come from a .basalt, else empty.
     std::string model_path;
 };

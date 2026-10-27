@@ -1,6 +1,7 @@
 // src/core/verify.cpp - see include/basalt/core/verify.hpp.
 #include "basalt/core/load_progress.hpp"
 #include "basalt/core/verify.hpp"
+#include "basalt/kernels/dflash2.hpp"
 #include "basalt/core/diag.hpp"
 #include "basalt/core/remote_expert_opt.hpp"
 
@@ -1487,6 +1488,7 @@ void Verifier::dm_free() {
 }
 
 Verifier::~Verifier() {
+    if (tap_dev_) { const OnDevice on(device_); cudaFree(tap_dev_); }
     const Verifier* self = this;
     g_diag_verifier.compare_exchange_strong(self, nullptr);
     for (auto& slot : g_live) {
@@ -1687,6 +1689,19 @@ bool Verifier::init(const WeightTable& wt, const ModelGeometry& g, SessionState&
     hits_ = hits;
     head_ = head;
     max_t_ = max_t;
+    if (!tap_layers_.empty()) {
+        tap_slot_.assign((size_t) g.n_layers, -1);
+        for (size_t i = 0; i < tap_layers_.size(); ++i) {
+            const int layer = tap_layers_[i];
+            if (layer < 0 || layer >= g.n_layers || tap_slot_[(size_t) layer] >= 0) {
+                err = "verify: invalid draft feature layer"; return false;
+            }
+            tap_slot_[(size_t) layer] = (int) i;
+        }
+        if (cudaMalloc((void**) &tap_dev_, (size_t) max_t * tap_layers_.size() * (size_t) g.n_embd * sizeof(float)) != cudaSuccess) {
+            err = "verify: draft feature allocation failed"; return false;
+        }
+    }
     sampling_.greedy = true;      // a fresh verifier samples greedily until set_sampling says otherwise
     sampling_.temperature = 0.0f;
     if (max_t < 2 || max_t > basalt::kernels::kVerifyMaxT || max_t > basalt::kernels::cpu::MAXT) {
@@ -3048,6 +3063,11 @@ bool Verifier::record_window(int T, cudaStream_t cs, std::string& err) {
             }
         } else if (cvec().covers(l)) {
             cvec_apply(Rt(0), l, n, HC * N, bo_, N, inj2_, HC, true, cs);
+        }
+        if (tap_dev_ && !batch_rec_ && tap_slot_[(size_t) l] >= 0) {
+            const int64_t nt = (int64_t) tap_layers_.size();
+            df2_tap_gr(Rt(0), HC * N, bo_, N, inj2_, HC,
+                       tap_dev_ + (size_t) tap_slot_[(size_t) l] * N, nt * N, n, N, (int) HC, cs);
         }
         return true;
     };

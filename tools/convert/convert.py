@@ -61,6 +61,7 @@ import struct
 import subprocess
 import sys
 import tempfile
+from typing import NoReturn
 import time
 from pathlib import Path
 
@@ -84,7 +85,7 @@ def model_license(kv: dict) -> dict:
     return lic
 
 
-def die(msg: str):
+def die(msg: str) -> NoReturn:
     raise SystemExit(f"convert: {msg}")
 
 
@@ -187,7 +188,7 @@ def convert(a) -> None:
     partial = Path(str(out) + ".partial")
     if out.exists() and not a.force:
         die(f"{out} exists (use --force to overwrite)")
-    base = None
+    base, base_meta = None, {}
     if a.sections_from:
         base = ModelFile(a.sections_from) if Path(a.sections_from).is_file() else die(f"missing input: {a.sections_from}")
         if a.mtp_source or a.mtp_dense or a.draft_vocab or a.profile or a.profile_from or a.hc8 or a.mmproj or a.no_vision:
@@ -587,6 +588,12 @@ def main():
     ap.add_argument("--mmproj", help="vision projector GGUF (required unless --no-vision)")
     ap.add_argument("--out", required=True, help="the .basalt file to write")
     ap.add_argument("--mtp-source", metavar="DIR", help="the drafter's BF16 tensors written by tools/convert/mtp_fetch.py fetch")
+    ap.add_argument("--dflash2-source", metavar="DIR", help="replace the drafter of --sections-from with a BF16 DFlash2 checkpoint")
+    ap.add_argument("--dflash2-quant", choices=("bf16", "q4_k"), default="bf16",
+                    help="DFlash2 projection format (default bf16; norms and codebooks stay BF16)")
+    ap.add_argument("--dflash2-proposal", metavar="FILE",
+                    help="int32 token ids of the target-head rows the drafter scores (a proposal shortlist, "
+                         "ranked; the rest of the head is not read during drafting)")
     ap.add_argument("--mtp-dense", metavar="FILE", help="a tuned (self-distilled) mtp/dense section to embed (needs --mtp-source)")
     ap.add_argument("--draft-vocab", metavar="FILE", help="int32 token ids the draft head may propose (needs --mtp-source)")
     ap.add_argument("--profile", metavar="FILE", help="an expert profile to store as it is (--expert-profile-save's file)")
@@ -607,6 +614,19 @@ def main():
     ap.add_argument("--workers", type=int, default=16, help="with --checkpoint: converter processes")
     ap.add_argument("--force", action="store_true", help="overwrite --out")
     a = ap.parse_args()
+    if a.dflash2_source:
+        if not a.sections_from or any((a.gguf, a.checkpoint, a.mtp_source, a.mtp_dense, a.mmproj, a.draft_vocab,
+                                      a.profile, a.profile_from, a.hc8, a.no_vision, a.compat_bf16, a.dense_q8_0,
+                                      a.requant_dense_q6k, a.force, a.name)):
+            ap.error("--dflash2-source takes only --sections-from and --out")
+        from dflash2 import replace_drafter
+        try:
+            replace_drafter(a.sections_from, a.dflash2_source, a.out, a.dflash2_quant, a.dflash2_proposal)
+        except (ValueError, OSError, KeyError) as e:
+            ap.error(str(e))
+        return
+    if a.dflash2_quant != "bf16" or a.dflash2_proposal:
+        ap.error("--dflash2-quant and --dflash2-proposal need --dflash2-source")
     if a.requant_dense_q6k:
         if a.sections_from or a.gguf or a.dense_q8_0:
             ap.error("--requant-dense-q6k takes only --checkpoint, --out, --workers and --force")

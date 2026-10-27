@@ -262,6 +262,7 @@ add_library(kernels STATIC src/kernels/cuda/dequant_s2.cu src/kernels/cuda/s2_ge
                         src/kernels/ngram.cpp
                         src/ngram/ple_reader.cpp)
 target_link_libraries(kernels PUBLIC core artifact)
+target_sources(kernels PRIVATE src/kernels/cuda/dflash2.cu)
 target_sources(kernels PRIVATE src/kernels/cuda/hc_fused.cu src/kernels/cuda/hc8_gr.cu)
 # the tensor-core prompt attention vs the FP32 kernel and FP64 (GPU, synthetic, no model); with
 if(BUILD_TESTING)
@@ -297,6 +298,7 @@ set_source_files_properties(src/kernels/cuda/native_mmvq.cu src/kernels/cuda/nat
     src/kernels/cuda/q5k_head.cu
     src/kernels/cuda/q6k_head.cu
     src/kernels/cuda/q80_head.cu
+    src/kernels/cuda/dflash2.cu
     PROPERTIES COMPILE_OPTIONS "--use_fast_math")
 
 # ---- engine -----------------------------------------------------
@@ -306,7 +308,7 @@ set_source_files_properties(src/kernels/cuda/native_mmvq.cu src/kernels/cuda/nat
 # about arithmetic, and this one knows the ORDER the arithmetic happens in.
 add_library(engine STATIC src/core/layer.cpp src/core/session.cpp src/core/expert_source.cpp src/core/remote_experts.cpp
   src/core/remote_expert_opt.cu
-  src/core/expert_cache.cpp src/core/vmm.cpp src/core/kv_arena.cpp src/core/native_head.cpp src/core/native_dense.cpp src/core/verify.cpp src/core/mtp.cpp
+  src/core/expert_cache.cpp src/core/vmm.cpp src/core/kv_arena.cpp src/core/native_head.cpp src/core/native_dense.cpp src/core/verify.cpp src/core/mtp.cpp src/core/dflash2.cpp
   src/core/conversation_snapshot.cpp src/core/conversation_state.cpp src/core/conversation_memory.cpp src/core/peer_experts.cpp src/core/staged_copy.cpp)
 target_include_directories(engine PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_link_libraries(engine PUBLIC core kernels kernels_cpu ${_gpu_runtime_target})
@@ -755,6 +757,10 @@ target_link_libraries(elementwise_parity PRIVATE kernels ${_gpu_runtime_target})
 basalt_gpu_test(NAME elementwise_parity COMMAND elementwise_parity --selftest)
 
 add_executable(bf16_gemv_parity tests/kernels/bf16_gemv_parity.cpp)
+add_executable(dflash2_parity tests/kernels/dflash2_parity.cpp)
+target_include_directories(dflash2_parity PRIVATE ${_gpu_include_directories})
+target_link_libraries(dflash2_parity PRIVATE kernels ggml_quants ${_gpu_runtime_target})
+basalt_gpu_test(NAME dflash2_parity COMMAND dflash2_parity)
 target_include_directories(bf16_gemv_parity PRIVATE ${_gpu_include_directories})
 target_link_libraries(bf16_gemv_parity PRIVATE kernels ${_gpu_runtime_target})
 basalt_gpu_test(NAME bf16_gemv_parity COMMAND bf16_gemv_parity --selftest)
@@ -1074,6 +1080,9 @@ target_link_libraries(kernels_cpu PUBLIC Threads::Threads platform)
 add_library(ggml_quants STATIC src/kernels/cpu/ggml/ggml_quants.c)
 target_include_directories(ggml_quants PUBLIC include PRIVATE src/kernels/cpu/ggml)
 set_target_properties(ggml_quants PROPERTIES C_STANDARD 11 C_EXTENSIONS ON POSITION_INDEPENDENT_CODE ON)
+add_library(basalt_quant SHARED tools/convert/quant.cpp)
+target_link_libraries(basalt_quant PRIVATE ggml_quants)
+set_target_properties(basalt_quant PROPERTIES WINDOWS_EXPORT_ALL_SYMBOLS ON)
 # The CPU dot products are built for AVX2 and for AVX-512, each with its own name for the table lookup;
 # ggml_cpu_dispatch.cpp picks one at run time (cpu_avx512_ok / cpu_avx2_ok).
 set(_ggml_dots_avx2_flags ${_isa_avx2_flags})

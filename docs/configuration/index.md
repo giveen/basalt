@@ -176,6 +176,12 @@ The prompt is read in batched chunks. These settings set the chunk size and how 
 
 ## Speculative decoding (MTP)
 
+A pack may replace MTP with a BF16 or Q4_K DFlash2 drafter. For DFlash2, `spec` sets a block of 2–16 positions:
+one anchor plus 1–15 drafts. The default is eight positions. Target verification stays in windows of at most eight;
+longer accepted chains continue in another window. DFlash2 requires one GPU and one session; prompt reuse is disabled.
+Blocks above eight positions extrapolate beyond the checkpoint's configured block size.
+See [pack conversion](../model-file.md#dflash2-drafter) and [precision](../precision/dflash2.md).
+
 The drafter proposes tokens and the model verifies them. Unless `relaxed-drafting` is on, the output is exactly what
 plain decoding would give.
 

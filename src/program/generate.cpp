@@ -65,6 +65,7 @@
 #include "basalt/core/native_head.hpp"
 #include "basalt/core/verify.hpp"
 #include "basalt/core/mtp.hpp"
+#include "basalt/core/dflash2.hpp"
 #include "basalt/prefill/gemm.hpp"
 #include "basalt/prefill/prefill.hpp"
 #include "basalt/core/native_dense.hpp"
@@ -492,6 +493,7 @@ void usage() {
                  "  --grammar on|off     --serve: enforce a request's \"grammar\" (tool-call, JSON-schema or JSON-object\n"
                  "                       grammar) on the sampled tokens; the vocabulary comes from the pack.  Default off\n"
                  "  --mtp-max-t M        cap the MTP's windows at M tokens (0 = --spec; longer ones come from suffixes)\n"
+                 "                       DFlash2: --spec sets 2..16 block positions, verified in chunks of at most 8\n"
                  "  --control-vector-scaled FILE:SCALE[,...]  a control vector GGUF on the residual stream (llama.cpp's\n"
                  "                       format; --control-vector FILE = scale 1).  --serve: requests switch it (cvec=0|1)\n"
                  "  --control-vector-layer-range A B  the layers it follows (inclusive; default 1 .. the last)\n"
@@ -1431,6 +1433,10 @@ int main(int argc, char** argv) {
         }
     }
     const basalt::core::PackFiles pack_files = basalt::core::PackFiles::from(srcs);
+    if (srcs.dflash2_model.empty() != srcs.dflash2_config.empty())
+        return fatal_start_error("DFlash2 requires both model and config sections");
+    const bool has_df2 = !srcs.dflash2_model.empty() && !srcs.dflash2_config.empty();
+    if (has_df2 && !o.mtp.empty()) return fatal_start_error("a model cannot carry both MTP and DFlash2");
     const basalt::core::ExpertFiles expert_files = basalt::core::ExpertFiles::from(srcs);
     // ---- two or more cards: what they do together is priced and the cheapest mechanism the engine has runs (one card:
     // nothing to choose, and no other card is touched)
@@ -1540,7 +1546,12 @@ int main(int argc, char** argv) {
     // Speculation needs the pack's drafter; prompt chunks are sized from what the expert cache can lend; the experts
     // the GPU does not hold go to page-locked RAM when they fit (a plain file mapping when not); the adaptive tier
     // of a server on one card runs a round every window.  An explicit flag always wins.
-    if (!o.spec_given && !o.mtp.empty()) o.spec = 8;
+    if (!o.spec_given && (!o.mtp.empty() || has_df2)) o.spec = 8;
+    const bool df2_on = has_df2 && o.spec >= 2;
+    if (df2_on && (chosen_cards.size() > 1 || o.batch > 0 || o.spec > basalt::core::Dflash2Drafter::kMaxRows))
+        return fatal_start_error("DFlash2 requires one GPU, one session and a block of at most 16 tokens");
+    const int df2_rows = df2_on ? o.spec : basalt::core::Dflash2Drafter::kRows;
+    if (df2_on) o.spec = std::min(o.spec, basalt::kernels::kVerifyMaxT);
     if (!o.prefill_given) {
         o.prefill_auto = o.prefill_auto_fit = true;
         o.prefill_auto_max = 32768;
@@ -2268,6 +2279,7 @@ int main(int argc, char** argv) {
             basalt::core::NativeHead::plan_bytes(o.native_shards, head_bytes, err) &&
             (o.mtp.empty() || o.spec < 2 ||
              basalt::core::MtpDrafter::plan_bytes(basalt::core::MtpFiles::from(srcs), g, mtp_bytes, err));
+        if (df2_on) mtp_bytes += srcs.dflash2_model.bytes;
         if (planned) {
             cuda0_fixed_bytes = pool_bytes + dense_bytes + head_bytes + mtp_bytes +
                                 basalt::core::Verifier::hc8_plan_bytes(
@@ -2920,6 +2932,8 @@ int main(int argc, char** argv) {
     // Secure MTP's CUDA0 allocations before the large host arena is registered with both CUDA contexts: the driver can
     // refuse the draft weights after mapping tens of GiB of host pages.
     basalt::core::MtpDrafter mtp;
+    basalt::core::Dflash2Drafter df2;
+    if (df2_on && !df2.load(srcs.dflash2_model, srcs.dflash2_config, 0, df2_rows, err)) return fatal_start_error(err);
     if (!o.mtp.empty()) {
         if (o.spec < 2) o.mtp.clear();
         if (!o.mtp.empty()) mtp.set_prompt_len((int64_t) o.tokens.size());
@@ -5109,7 +5123,7 @@ int main(int argc, char** argv) {
     };
     if (!o.serve) report_expert_tiers();
     if (o.serve) {
-        if ((!no_spec && (o.spec < 2 || o.mtp.empty())) || o.prefill_chunk <= 0 ||
+        if ((!no_spec && (o.spec < 2 || (o.mtp.empty() && !df2_on))) || o.prefill_chunk <= 0 ||
             (graph_hits && (thits.d_res == nullptr || host_res.empty()))) {
             basalt::log::error("basalt serve", "needs --spec T (0 for none; T >= 2 also needs the model's draft layer) "
                                  "and --prefill CHUNK (and a fillable "
@@ -5604,11 +5618,14 @@ int main(int argc, char** argv) {
         for (const auto& xpe : xpeers)
             if (xpe->valid()) ver.add_peer(xpe.get());
         ver.set_cpu_warm(drive.d.pool, drive.d.src);
+        if (df2_on) ver.set_taps(df2.tap_layers());
         if (!ver.init(wt, g, ss, vh, native_head.loaded() ? &native_head : nullptr, std::max({o.spec, o.batch, 2}), err) ||
             (mtp_on && !mtp.bind(wt, multi_gpu ? &mtp_head : &native_head, ver.final_R_all(), err))) {
             basalt::log::error("basalt serve", "%s", err.c_str());
             return 1;
         }
+        if (df2_on && (!df2.bind(wt, &native_head, err) || !df2.prepare(ver.tap_dev(), err)))
+            return fatal_start_error(err);
         if (pipe_on && !ver_b.init(wt, g, ss, vh, native_head.loaded() ? &native_head : nullptr, std::max({o.spec, o.batch, 2}), err)) {
             basalt::log::error("basalt serve", "pipelined windows: %s", err.c_str());
             return 1;
@@ -5890,6 +5907,13 @@ int main(int argc, char** argv) {
                         ms > 0.0 ? 1000.0 * (double) (at - pp_from) / ms : 0.0);
             std::fflush(stdout);
         };
+        if (df2_on) {
+            sp.set_taps(df2.tap_layers());
+            sp.on_taps = [&](const float* taps, int64_t rows, int64_t pos, std::string& e) {
+                return df2.context(taps, rows, pos, e);
+            };
+            basalt::log::info("basalt dflash2", "prompt reuse=off");
+        }
         sp.on_chunk = [&](const float* R_rows, int64_t T, int64_t p0, std::string& e) -> bool {
             std::vector<int32_t> nxt((size_t) T);
             for (int64_t t = 0; t < T; ++t) nxt[(size_t) t] = (int32_t) cur[(size_t) (p0 + t + 1)];
@@ -8862,6 +8886,7 @@ int main(int argc, char** argv) {
                              return (int64_t) c.ids.size() > resume || !starts_with(c.ids, c.imgs);
                          }), checks.end());
             live_ok = false;   // until this request has finished, the session is in between
+            if (df2_on) { resume = 0; df2.reset(); }
             if (resume == 0) {
                 basalt::core::session_zero(*rsp, g, nullptr, main_cs);
                 cudaStreamSynchronize(main_stream);
@@ -8954,6 +8979,7 @@ int main(int argc, char** argv) {
                         return false;
                     }
                     if (!ver.commit(T, e) || (mtp_on && !mtp.prefill(ver.final_R_all(), nxt.data(), T, q, e))) return false;
+                    if (df2_on && !df2.context(ver.tap_dev(), T, q, e)) return false;
                     q += T;
                     pp_reached = q;
                 }
@@ -10098,7 +10124,8 @@ int main(int argc, char** argv) {
                 int T = 1;
                 if (held.on) T = held.T;
                 else
-                while (T < S_mtp && basalt::core::draft_keep(dprob.data(), T - 1, cum_adapt.th())) ++T;
+                while (T < (df2_on ? std::min(S_mtp, df2.draft_count() + 1) : S_mtp) &&
+                       basalt::core::draft_keep(dprob.data(), T - 1, cum_adapt.th())) ++T;
                 if (first_window) T = (int) (n - fold_p0);
                 const int e0 = first_window ? T - 1 : 0;   // rows before it are prompt tokens: forced, not emitted
                 if (ppl != nullptr) {
@@ -10449,6 +10476,10 @@ int main(int argc, char** argv) {
                         held.T = TB;
                         for (int i = 0; i < TB; ++i) held.win[(size_t) i] = win_b[(size_t) i];
                         std::swap(cv, ov);
+                    } else if (will_draft && df2_on) {
+                        after_launch();
+                        drafted = df2.draft(cv->tap_dev(), a + 1, p, outv[(size_t) a], drafts.data(), dprob.data(),
+                                            !from_sfx && e0 == 0 && T == basalt::kernels::kVerifyMaxT && a == T - 1, err);
                     } else if (will_draft && mtp_on) {
                         mtp.set_launch_hook(after_launch);
                         pair_hint = pair_req && full_ema >= kPairFull;
@@ -10534,8 +10565,10 @@ int main(int argc, char** argv) {
                 basalt::core::decode_gaps().mark(5);
                 if (!from_sfx && e0 == 0) cum_adapt.observe(dprob.data(), T - 1, a);
                 mtp.set_cum_th(cum_adapt.th());
-                const bool drafted = eos || produced_n >= max_new || !mtp_on ||
-                                     mtp.draft(T, outv.data(), p, a, drafts.data(), err, dprob.data());
+                const bool drafted = eos || produced_n >= max_new ||
+                    (df2_on ? df2.draft(ver.tap_dev(), a + 1, p, outv[(size_t) a], drafts.data(), dprob.data(),
+                                        !from_sfx && e0 == 0 && T == basalt::kernels::kVerifyMaxT && a == T - 1, err)
+                            : !mtp_on || mtp.draft(T, outv.data(), p, a, drafts.data(), err, dprob.data()));
                 {
                     const Clock::time_point tw3 = Clock::now();
                     auto msd = [](Clock::time_point a0, Clock::time_point b0) { return std::chrono::duration<double, std::milli>(b0 - a0).count(); };
@@ -10898,6 +10931,13 @@ int main(int argc, char** argv) {
                 return e.empty() && mtp.prefill(R_rows, nxt.data(), T, p0, e);
             };
         }
+        if (df2_on) {
+            df2.reset();
+            prefill.set_taps(df2.tap_layers());
+            prefill.on_taps = [&](const float* taps, int64_t rows, int64_t pos, std::string& e) {
+                return df2.context(taps, rows, pos, e);
+            };
+        }
         const Clock::time_point tp0 = Clock::now();
         if (!prefill.run(o.tokens.data(), n_batched, 0, err)) {
             return fatal_start_error(err);
@@ -10973,10 +11013,13 @@ int main(int argc, char** argv) {
         vh.slot_off = xcache.slot_offsets();   // the device plan's pointers
         vh.n_slots = xcache.slots();
         ver.set_cpu_warm(drive.d.pool, drive.d.src);
+        if (df2_on) ver.set_taps(df2.tap_layers());
         if (!ver.init(wt, g, ss, vh, native_head.loaded() ? &native_head : nullptr, o.spec, err)) {
             return fatal_start_error(err);
         }
         const bool use_mtp = !o.mtp.empty();
+        if (df2_on && (!df2.bind(wt, &native_head, err) || !df2.prepare(ver.tap_dev(), err)))
+            return fatal_start_error(err);
         if (use_mtp && !mtp.bind(wt, &native_head, ver.final_R_all(), err)) {
             return fatal_start_error(err);
         }
@@ -11084,8 +11127,9 @@ int main(int argc, char** argv) {
         };
         int64_t p = spec_pos;
         int32_t x = (int32_t) tok;
-        std::vector<int32_t> drafts((size_t) o.spec, 0);
-        std::vector<float> dprob((size_t) o.spec, 1.0f);
+        const int draft_capacity = df2_on ? std::max(o.spec, basalt::core::Dflash2Drafter::kMaxDrafts) : o.spec;
+        std::vector<int32_t> drafts((size_t) draft_capacity, 0);
+        std::vector<float> dprob((size_t) draft_capacity, 1.0f);
         basalt::core::DraftCumAdapt cum_adapt;
         std::vector<int64_t> window_hist((size_t) o.spec + 1, 0);
         // the first window is the last prompt token alone (it produces the first generated token and the MTP's
@@ -11113,9 +11157,10 @@ int main(int argc, char** argv) {
         while ((int64_t) produced.size() < o.max_new) {
             const Clock::time_point t0 = Clock::now();
             int T = S_mtp;
-            if (use_mtp) {
+            if (use_mtp || df2_on) {
                 T = 1;
-                while (T < S_mtp && basalt::core::draft_keep(dprob.data(), T - 1, cum_adapt.th())) ++T;
+                while (T < (df2_on ? std::min(S_mtp, df2.draft_count() + 1) : S_mtp) &&
+                       basalt::core::draft_keep(dprob.data(), T - 1, cum_adapt.th())) ++T;
             }
             if (first_window) T = 1;
             bool from_sfx = false;
@@ -11137,7 +11182,7 @@ int main(int argc, char** argv) {
             window[0] = x;
             for (int i = 1; i < T; ++i) {
                 const size_t at = produced.size() - 1 + (size_t) i;
-                int32_t d = from_sfx ? sbuf[(size_t) i - 1] : use_mtp ? drafts[(size_t) i - 1]
+                int32_t d = from_sfx ? sbuf[(size_t) i - 1] : (use_mtp || df2_on) ? drafts[(size_t) i - 1]
                                                     : at < oracle.size() ? (int32_t) oracle[at] : 0;
                 if (o.spec_corrupt > 0 && (++corrupt_counter % o.spec_corrupt) == 0) d = (d + 1) % (int32_t) n_vocab;
                 window[(size_t) i] = d;
@@ -11169,10 +11214,26 @@ int main(int argc, char** argv) {
             bool adapt_ok = true;
             if (!drive.d.usage.empty() && ((rounds + 1) % o.adapt_every) == 0)
                 adapt_thr = std::thread([&] { adapt_ok = adapt(); });
+            // a window that ends the request starts no block
+            const auto ends_request = [&] {
+                if ((int64_t) produced.size() + a + 1 >= o.max_new) return true;
+                if (!o.stop_eos) return false;
+                for (int i = 0; i <= a; ++i)
+                    if (std::find(o.eos_ids.begin(), o.eos_ids.end(), (int64_t) outv[(size_t) i]) != o.eos_ids.end())
+                        return true;
+                return false;
+            };
+            const bool df2_wanted = df2_on && !ends_request();
+            bool df2_launched = true;
             if (!ver.commit(a + 1, err)) {
                 if (adapt_thr.joinable()) adapt_thr.join();
                 return fatal_start_error(err);
             }
+            // the block reads only this window's rows and the drafter's own K/V, so it starts now and its proposal is
+            // collected after the tokens go out: the host's printing runs under it
+            if (df2_wanted)
+                df2_launched = df2.launch(ver.tap_dev(), a + 1, p, outv[(size_t) a], drafts.data(), dprob.data(),
+                                          !from_sfx && T == basalt::kernels::kVerifyMaxT && a == T - 1, err);
             ++rounds;
             drafts_total += T - 1;
             drafts_ok += a;
@@ -11191,8 +11252,9 @@ int main(int argc, char** argv) {
             }
             if (use_mtp && !from_sfx) cum_adapt.observe(dprob.data(), T - 1, a);
             if (use_mtp) mtp.set_cum_th(cum_adapt.th());
-            const bool drafted = !use_mtp || (int64_t) produced.size() >= o.max_new ||
-                                 mtp.draft(T, outv.data(), p, a, drafts.data(), err, dprob.data());
+            const bool drafted = (int64_t) produced.size() >= o.max_new ||
+                (df2_on ? df2_launched && (!df2_wanted || df2.collect(drafts.data(), dprob.data(), err))
+                        : !use_mtp || mtp.draft(T, outv.data(), p, a, drafts.data(), err, dprob.data()));
             if (adapt_thr.joinable()) adapt_thr.join();
             if (!adapt_ok) return 1;
             if (!drafted) {
@@ -11262,6 +11324,12 @@ int main(int argc, char** argv) {
             std::printf("%-24s %.3f ms/round drafting (%lld rounds), MTP prompt %.1f ms, %.0f MiB of VRAM\n", "mtp",
                         mtp.ms_draft / (double) mtp.rounds, (long long) mtp.rounds, mtp.ms_prefill,
                         (double) mtp.vram_bytes() / 1048576.0);
+        if (df2_on && (df2.rounds > 0 || df2.reused > 0))
+            std::printf("%-24s %.3f ms/round drafting (%lld blocks, %lld reused chains), %.3f ms on the GPU, "
+                        "context %.1f ms, %.0f MiB of VRAM\n", "dflash2",
+                        df2.ms_draft / (double) std::max<int64_t>(df2.rounds, 1), (long long) df2.rounds,
+                        (long long) df2.reused, df2.ms_gpu / (double) std::max<int64_t>(df2.rounds, 1), df2.ms_ctx,
+                        (double) df2.vram_bytes() / 1048576.0);
     }
 
     if (dump != nullptr && std::fclose(dump) != 0) {

@@ -26,6 +26,63 @@ python3 tools/convert/convert.py --gguf MODEL-00001-of-0000N.gguf --mmproj MMPRO
 
 `python3 tools/convert/convert.py --help` describes every input.
 
+## DFlash2 drafter
+
+Replace a pack's MTP sections with the BF16
+[Flash-Next DFlash2 checkpoint](https://huggingface.co/incoai/Qwen3.8-Flash-Next-DFlash2):
+
+```sh
+python3 tools/convert/convert.py --sections-from MODEL.basalt --dflash2-source DFLASH2_DIR \
+    --out MODEL-DFlash2-BF16.basalt
+```
+
+The directory supplies `model.safetensors`, `config.json` and, when present, `README.md`. The converter checks the
+tensor shapes and target geometry, copies every non-drafter section with SHA-256 verification, removes `mtp/*`,
+and writes `dflash2/model`, `dflash2/config` and `dflash2/model_card`. BF16 tensor bytes are unchanged. The source
+pack is never overwritten. The engine selects the drafter from the pack; both drafter types in one pack are refused.
+Runtime constraints and arithmetic: [DFlash2 precision](precision/dflash2.md).
+
+For Q4_K projections, build the converter's reference quantizer and add `--dflash2-quant q4_k`:
+
+```sh
+cmake --build build --target basalt_quant
+python3 tools/convert/convert.py --sections-from MODEL.basalt --dflash2-source DFLASH2_DIR \
+    --dflash2-quant q4_k --out MODEL-DFlash2-Q4_K.basalt
+```
+
+Projection matrices are quantized once from the BF16 checkpoint. Norms, convolution base kernels and selector
+codebooks stay BF16. The safetensors payload stores packed quantized bytes as U8 tensors with original shapes and formats
+in `basalt.dflash2.quantization` metadata. The target sections are still copied without conversion.
+
+The drafter scores the target head once per block, over every vocabulary row. `--dflash2-proposal FILE` narrows that
+to a shortlist: an int32 file of global token ids (the same file format `--draft-vocab` takes), ranked so the tokens
+the drafter may propose come first. The list is stored in `dflash2/config` as `proposal_ids` and the engine gathers
+those rows of the target head at load, so a shortlisted token's logits are the full head's logits and the remaining
+rows cost nothing per block. A frequency ranking over the workload's text is what to give it (the file is a plain
+`np.int32` dump of the ranking); the artifact keeps the target sections byte-identical, so nothing about the target
+changes.
+
+The ranking is a count over whatever text the deployment writes, tokenized with the pack's own tokenizer:
+
+```python
+import collections, json, sys
+import numpy as np
+sys.path[:0] = ['.', 'tools']
+from model_file import ModelFile
+from tokenizer import Tokenizer
+
+meta = json.loads(ModelFile('MODEL.basalt').read('meta'))
+tok = Tokenizer.from_metadata(meta.get('gguf_kv') or meta)
+counts = collections.Counter(tok.encode(open('CORPUS.txt', encoding='utf-8', errors='ignore').read(6_000_000)))
+ranked = [t for t, _ in counts.most_common() if t < 248077]          # the public token domain
+np.array(ranked[:32768], dtype='<i4').tofile('RANKING.i32')
+```
+
+```sh
+python3 tools/convert/convert.py --sections-from MODEL.basalt --dflash2-source DFLASH2_DIR \
+    --dflash2-quant q4_k --dflash2-proposal RANKING.i32 --out MODEL-DFlash2-Q4K-P.basalt
+```
+
 ## Packs
 
 A pack you convert yourself from a GGUF, without the official files' expert profile, hc8 copies and tuned drafter, will be significantly slower than the official `.basalt` files. How precision is handled and how quality is measured: [precision](precision/index.md).

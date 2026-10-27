@@ -361,7 +361,13 @@ public:
     /// --profile: GPU stage times of the windows since the last call (ms per window), as one line; empty when off.
     std::string profile_report();
 
+    /// Completed layer outputs, averaged over residual streams, for a block drafter.
+    void set_taps(const std::vector<int>& layers) { tap_layers_ = layers; }
+    const float* tap_dev() const { return tap_dev_; }
 private:
+    std::vector<int> tap_layers_;
+    std::vector<int> tap_slot_;
+    float* tap_dev_ = nullptr;
     RemoteExpertOpt* remote_opt_ = nullptr;
     bool main_high_ = false;
     PeerExperts* peer_ = nullptr;

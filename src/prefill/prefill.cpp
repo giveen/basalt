@@ -1,5 +1,6 @@
 // src/prefill/prefill.cpp - see include/basalt/prefill/prefill.hpp.
 #include "basalt/prefill/prefill.hpp"
+#include "basalt/kernels/dflash2.hpp"
 #include "basalt/core/mtp.hpp"
 #include "basalt/core/progress.hpp"
 #include "basalt/core/diag.hpp"
@@ -625,6 +626,8 @@ void Prefill::release() {
     if (!impl_) return;
     if (impl_->warm.fut.valid()) impl_->warm.fut.wait();
     if (impl_->cs) cudaStreamSynchronize(impl_->cs);
+    if (tap_dev_) cudaFree(tap_dev_);
+    tap_dev_ = nullptr;
     if (impl_->copy) cudaStreamSynchronize(impl_->copy);
     for (int i = 0; i < RING_MAX; ++i) {
         if (impl_->copied[i]) cudaEventDestroy(impl_->copied[i]);
@@ -1512,6 +1515,19 @@ bool Prefill::run_impl(const int64_t* tokens, int64_t n, int64_t pos0, std::stri
     core::SessionState& ss = *m.ss;
     const auto t_start = Clock::now();
     const int64_t LB = stage_lb_, LE = stage_le_;
+    std::vector<int> tap_slot((size_t) g.n_layers, -1);
+    if (!tap_layers_.empty()) {
+        for (size_t i = 0; i < tap_layers_.size(); ++i) {
+            const int layer = tap_layers_[i];
+            if (layer < LB || layer >= LE || tap_slot[(size_t) layer] >= 0) {
+                err = "prefill: invalid draft feature layer"; return false;
+            }
+            tap_slot[(size_t) layer] = (int) i;
+        }
+        if (!tap_dev_ && cudaMalloc((void**) &tap_dev_, (size_t) 2048 * tap_layers_.size() * (size_t) g.n_embd * 4) != cudaSuccess) {
+            err = "prefill: draft feature allocation failed"; return false;
+        }
+    }
     // set_ring_remote: an expert with no pinned host copy that the other card's cache holds (its blob there), or null
     auto remote_blob = [&m](int64_t l, int32_t e) -> const uint8_t* {
         if (m.remote_res == nullptr || m.src == nullptr || m.src->pinned(l, e)) return nullptr;
@@ -2859,6 +2875,12 @@ bool Prefill::run_impl(const int64_t* tokens, int64_t n, int64_t pos0, std::stri
                 }
                 if (half == 1 && basalt::kernels::cvec().covers(l))   // --control-vector-scaled
                     basalt::kernels::cvec_apply(m.R, l, T, D, nullptr, 0, nullptr, 0, false, m.cs);
+                if (half == 1 && tap_slot[(size_t) l] >= 0) {
+                    const int64_t start = std::max<int64_t>(0, T - 2048);
+                    const int64_t nt = (int64_t) tap_layers_.size();
+                    basalt::kernels::df2_tap_rows(m.R + (size_t) start * D, tap_dev_ + (size_t) tap_slot[(size_t) l] * N,
+                                 nt * N, N, (int) HC, (int) (T - start), m.cs);
+                }
             }
         }
         if (!ple_land()) return false;   // a stage that ends before layer 1: the rows land anyway, the next gather starts
@@ -2897,13 +2919,17 @@ bool Prefill::run_impl(const int64_t* tokens, int64_t n, int64_t pos0, std::stri
             hand_buf_ ^= 1;
             continue;   // the last stage reports the chunk (on_chunk)
         }
-        if (on_chunk || on_stage_chunk) {
+        if (on_chunk || on_stage_chunk || on_taps) {
             if (cudaStreamSynchronize(m.cs) != cudaSuccess) {
                 err = std::string("prefill: ") + cudaGetErrorString(cudaGetLastError());
                 return false;
             }
             if (on_stage_chunk && !on_stage_chunk(p0 + T, err)) return false;
             if (on_chunk && !on_chunk(m.R, T, p0, err)) return false;
+            if (on_taps && tap_dev_) {
+                const int64_t start = std::max<int64_t>(0, T - 2048);
+                if (!on_taps(tap_dev_, T - start, p0 + start, err)) return false;
+            }
         }
     }
     // Do not drain the successor here. This is the overlap: an intermediate
