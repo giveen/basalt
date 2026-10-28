@@ -26,10 +26,10 @@ int64_t lend_slots(const basalt::core::ExpertCache& xc, const basalt::core::Mode
 int64_t request_chunk(int64_t tokens, int64_t max_chunk);
 
 /// How one card reads a part of `tokens` in chunks of at most `cap`: equal chunks for the fewest chunks, and with
-/// `head_ok` a short first chunk (`auto_fit` is the operator's --prefill auto-with-fit).  (chunk, head chunk).
+/// `head_ok` a first chunk of its own (`auto_fit` is the operator's --prefill auto-with-fit).  (chunk, head chunk).
 std::pair<int64_t, int64_t> one_card_chunks(int64_t tokens, int64_t cap, bool head_ok, bool auto_fit);
 
-/// The sizes of a part's chunks: `head` first when set, then `chunk`-sized ones.
+/// The sizes of the chunks the prompt path reads a part in, for a chunk and head chunk.
 std::vector<int64_t> chunk_list(int64_t tokens, int64_t chunk, int64_t head);
 
 /// The largest chunk the lend can fund (with `prefill_auto`, the largest on the 256-token grid under the caps),

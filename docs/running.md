@@ -30,7 +30,10 @@ The next request that needs less gives the cells back and the cache refills the 
 decodes with the cache a 32k context would have, whatever `--max-context` is. With `--parallel` every slot is elastic
 once its share of the context is above 4096 tokens: it backs 4096 cells at startup and grows by 4096, so idle and short
 slots leave their VRAM to the expert cache. The startup line `elastic KV: ...` says
-how much of the cache is lent this way, and each move is logged (`elastic KV: N cells backed ...`).
+how much of the cache is lent this way, and each move is logged (`elastic KV: N cells backed ...`). The cache never goes
+below the slots a prompt chunk needs: a request whose KV would take it there, even after the other sessions give back
+the cells they do not hold, is refused with that error, and a reply that grows past it ends with it (a `--parallel`
+slot ends as at its length limit); the engine keeps running.
 
 While other slots are decoding, a new prompt of up to 16384 tokens is read at once: the slots wait for it (a few
 seconds at most), and it is read as in the single-stream path: the same chunks and streamed ring, the CPU pool's
@@ -154,9 +157,10 @@ Basalt refuses settings that would leave the machine without memory, and never s
 - `--vram-reserve-mib` below 256 is refused at startup: with less VRAM free once everything is loaded, a later
   allocation can make the driver page GPU memory and requests stall.
 - When some experts are read from the SSD (they fit in neither the GPUs nor the RAM copy), the RAM copy leaves a
-  floor free for the OS file cache: the RAM margin (2 GiB or 5% of the RAM, the larger) plus the larger of 3.5 GiB plus two layers'
-  experts (what one prompt chunk reads from the file) and 4 GiB. The startup line `RAM floor ...` gives the figures.
-  When every expert has a place, only the margin is kept, as before.
+  floor free for the OS file cache: the RAM margin (2 GiB or 5% of the RAM, the larger) plus the larger of 4 GiB and
+  what one prompt chunk reads from the file (up to 3.5 GiB for the lent GPU slots, plus the SSD-held experts of two
+  layers). The startup line `RAM floor ...` gives the figures. When every expert has a place, only the margin is kept;
+  the copies kept for the lent slots and the adaptive swaps do not count toward that: they take the RAM left over.
 - A server's RAM copy also leaves room for what serving takes after startup: the conversation checkpoints (each the
   model's whole running state, `--prompt-cache` of them per slot plus one), `--conversation-cache-mib`, one image's
   buffers and a request's own buffers. The startup line `RAM ... free, guard ...` gives the figures.
@@ -165,7 +169,7 @@ Basalt refuses settings that would leave the machine without memory, and never s
   and a round swaps fewer.
 - An explicit `--resident-budget-gib` that would leave less than that floor free is refused at startup; the error
   states the RAM free and the largest safe value ('max').
-- While serving, a request that finds MemAvailable below the margin plus 3.5 GiB (the margin alone when no expert is
+- While serving, a request that finds MemAvailable below the margin plus a prompt chunk's file reads, up to 3.5 GiB (the margin alone when no expert is
   read from the SSD) stops with an error (`RAM low (... free < ... guard): request stopped`, also returned to the
   client); the server keeps running and takes the next request. Windows does not count the pages read through the
   mapped expert file as available, so within 1 GiB of the guard the engine gives them back first and reads again.

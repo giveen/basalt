@@ -6,6 +6,7 @@
 
 #include "basalt/kernels/cpu/expert_layout.hpp"
 #include "basalt/prefill/prefill.hpp"
+#include "basalt/program/multi_gpu_plan.hpp"   // prompt_one_card_chunks, prompt_chunk_list
 
 #include "../engine_local.hpp"   // biggest_chunk
 
@@ -37,28 +38,11 @@ int64_t request_chunk(int64_t tokens, int64_t max_chunk) {
 
 std::pair<int64_t, int64_t> one_card_chunks(int64_t tokens, int64_t cap, bool head_ok, bool auto_fit) {
     constexpr int64_t kHeadChunk = 16384;   // the first chunk of a prompt above the chunk cap
-    int64_t want = request_chunk(tokens, cap);
-    if (want > 0 && tokens > cap) {
-        const int64_t parts = (tokens + cap - 1) / cap;
-        want = request_chunk((tokens + parts - 1) / parts, cap);
-    }
-    int64_t head = 0;
-    if (head_ok && auto_fit && tokens > cap && tokens >= 2 * kHeadChunk && cap > kHeadChunk) {
-        const int64_t rem = tokens - kHeadChunk, parts = (rem + cap - 1) / cap;
-        want = request_chunk((rem + parts - 1) / parts, cap);
-        head = kHeadChunk;
-    }
-    return {want, head};
+    return basalt::program::prompt_one_card_chunks(tokens, cap, head_ok && auto_fit, kHeadChunk);
 }
 
 std::vector<int64_t> chunk_list(int64_t tokens, int64_t chunk, int64_t head) {
-    std::vector<int64_t> v;
-    for (int64_t at = 0; chunk > 0 && at < tokens;) {
-        const int64_t T = std::min(at == 0 && head > 0 ? head : chunk, tokens - at);
-        v.push_back(T);
-        at += T;
-    }
-    return v;
+    return basalt::program::prompt_chunk_list(tokens, chunk, head);
 }
 
 int64_t plan_lend(int64_t& chunk, const basalt::core::ExpertCache& xc, const basalt::core::ModelGeometry& g,

@@ -33,10 +33,12 @@
 
 namespace basalt::program::engine_local {
 
-/// One candidate split price: the plan's cost, the prompt chunk and the head chunk it was measured with.
+/// One candidate split price: the plan's cost, the prompt chunk and the head chunk it was measured with, and when the
+/// part is not priced (chunk 0) why not.
 struct SplitPricing {
     basalt::program::PsPrice price;
     int64_t chunk = 0, head = 0;
+    std::string why;
 };
 
 /// The largest multiple of 256 in [0, ceiling] that `ok` accepts.  `ok` is monotone: false once too large.
