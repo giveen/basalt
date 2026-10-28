@@ -407,8 +407,7 @@ void usage() {
                  "  --dump-logits PATH   write one line of raw logits per position\n"
                  "  --logits-stride N    store every Nth row plus final input (default 1); N>1 requires --max-new 1\n"
                  "  --dump-residual PATH write the final R (hc x n_embd, f32) for head bisection\n"
-                 "  --dump-layers PATH   write R after EVERY layer, per position: the bisection ladder\n"
-                 "  --dump-halves PATH   write both halves' block_out and inject per layer: the half bisection\n"
+
                  "  --dump-routing PATH  write the routed expert ids and weights per layer per position\n"
                  "  --no-capture         run the layers directly instead of replaying graphs\n"
                  "  --vision             --serve takes images too (GENI requests; embeddings from basalt-vision)\n"
@@ -1020,8 +1019,6 @@ int main(int argc, char** argv) {
         }
         else if (a == "--dump-residual") o.dump_residual = next("--dump-residual");
         else if (a == "--dump-mixed") o.dump_mixed = next("--dump-mixed");
-        else if (a == "--dump-layers") o.dump_layers = next("--dump-layers");
-        else if (a == "--dump-halves") o.dump_halves = next("--dump-halves");
         else if (a == "--dump-routing") o.dump_routing = next("--dump-routing");
         else if (a == "--ple-io") o.ple_io = next("--ple-io");
         else if (a == "--ple-row-cache") o.ple_row_cache = std::atoll(next("--ple-row-cache"));
@@ -2252,10 +2249,9 @@ int main(int argc, char** argv) {
                      native_dense.tensor_count(), (double) native_dense.weight_bytes() / (1024.0 * 1024.0), load_s());
     }
 
-    // The fused hyper-connection read needs the layout where R lags by one pending write; the per-stage and dump
-    // measurements need the unfused layout of R.
-    basalt::core::layer_set_fused_gr(!o.gpu_stages && o.dump_layers.empty() && o.dump_halves.empty() &&
-                                     !o.stage_timing);
+    // The fused hyper-connection read needs the layout where R lags by one pending write; the per-stage measurement
+    // needs the unfused layout of R.
+    basalt::core::layer_set_fused_gr(!o.gpu_stages && !o.stage_timing);
     // The vision path: every rope kernel reads a cell's (t, h, w) from this table (basalt/kernels/mrope.hpp).  It is
     // the identity until an image request, and it is set here, before any CUDA graph captures a rope kernel.
     int32_t* d_mrope = nullptr;
@@ -2299,30 +2295,6 @@ int main(int argc, char** argv) {
         return 1;
     }
     void* const main_cs = (void*) main_stream;
-
-    // ---- **THE HALF-LEVEL DUMP HAS TO BE ARMED BEFORE `session_capture`, AND THE LADDER MUST NOT BE.**  The
-    // half copies are issued from inside `block_layer_pre`/`block_layer_post`, so they are only ever enqueued
-    // while a graph is being CAPTURED - arming `ss.block.dump` afterwards would produce a file of zeros that
-    // reads exactly like a wrong answer.  The ladder is the opposite: `session_loop` enqueues it per token on
-    // the replay stream, so it must be armed after capture to stay out of the graph.
-    const uint64_t half_stride = (uint64_t) 2 * g.n_embd + (uint64_t) 2 * g.hc +
-                                 (uint64_t) g.n_head * g.head_dim +
-                                 (uint64_t) 5 * g.n_head_kv * g.head_dim + 8;
-    std::FILE* half_dump = nullptr;
-    float* half_stage = nullptr;
-    if (!o.dump_halves.empty()) {
-        half_dump = std::fopen(o.dump_halves.c_str(), "wb");
-        if (half_dump == nullptr) {
-            basalt::log::error("basalt generate", "cannot write %s", o.dump_halves.c_str());
-            return 1;
-        }
-        const size_t n = (size_t) g.n_layers * (size_t) half_stride;
-        if (cudaHostAlloc((void**) &half_stage, n * sizeof(float), cudaHostAllocDefault) != cudaSuccess) {
-            basalt::log::error("basalt generate", "cannot pin the half-dump staging buffer");
-            return 1;
-        }
-        ss.block.dump = half_stage;
-    }
 
     basalt::core::Doorbell db;
     if (basalt::core::doorbell_init(g, K, db) == 0) {
@@ -3723,19 +3695,8 @@ int main(int argc, char** argv) {
                      "GPU-only floor is what you want.");
         return 2;
     }
-    // The ladder is written by `session_loop`, and `session_token` does not touch the staging buffer at all - so
-    // accepting the flag there would produce a file of uninitialised memory, which reads as a wrong answer rather
-    // than as a mistake.  `--no-capture` without `--no-pool` is already refused above, so this catches the pair.
-    if (o.no_capture && !o.dump_layers.empty()) {
-        basalt::log::error("basalt generate", "--dump-layers is written by `session_loop`; `--no-capture` runs "
-                     "`session_token` instead, which never fills the staging buffer. Drop one of the two.");
-        return 2;
-    }
-    if (o.no_capture && !o.dump_halves.empty()) {
-        basalt::log::error("basalt generate", "--dump-halves is CAPTURED into the layer graphs, so it needs the "
-                     "captured path; `--no-capture` never records it. Drop one of the two.");
-        return 2;
-    }
+    // The ladder is written by `session_loop`, which this build never runs; nothing fills the staging buffer, so the
+    // two flags that asked for it are gone (see the PR that removed them).
 
     basalt::log::info("basalt generate", "session is up (engine %s)", BASALT_VERSION);
     auto run_head = [&](void* stream) -> bool {
@@ -3827,22 +3788,6 @@ int main(int argc, char** argv) {
     // `llama-debug`'s `l_last-<il>` node instead of against a single end-to-end perplexity.  The buffer is
     // PINNED because `session_loop` enqueues a device-to-host copy into it after every layer and the transfer
     // would otherwise be staged through a pageable bounce buffer on the critical path.
-    std::FILE* layer_dump = nullptr;
-    float* layer_stage = nullptr;
-    const size_t layer_floats = (size_t) (g.n_layers + 1) * (size_t) g.hc * (size_t) g.n_embd;
-    if (!o.dump_layers.empty()) {
-        layer_dump = std::fopen(o.dump_layers.c_str(), "wb");
-        if (layer_dump == nullptr) {
-            basalt::log::error("basalt generate", "cannot write %s", o.dump_layers.c_str());
-            return 1;
-        }
-        if (cudaHostAlloc((void**) &layer_stage, layer_floats * sizeof(float), cudaHostAllocDefault) !=
-            cudaSuccess) {
-            basalt::log::error("basalt generate", "cannot pin the layer-dump staging buffer");
-            return 1;
-        }
-    }
-
     // ---- prefill here is the DECODE PATH ONE TOKEN AT A TIME: the prompt goes through the decode-style graphs.  The
     // batched prompt path is a separate component.
     //
@@ -4124,7 +4069,7 @@ int main(int argc, char** argv) {
     int32_t* d_hit_count = nullptr;
     basalt::core::TokenHits thits;
     const bool graph_hits = hit_fn != nullptr && !profile.empty() && !o.no_pool;
-    if (graph_hits && !o.no_capture && layer_dump == nullptr && half_dump == nullptr) {
+    if (graph_hits && !o.no_capture) {
         host_res.assign((size_t) (g.n_layers * g.n_expert), basalt::core::kNotResident);
         int64_t resident = 0;
         for (int64_t l = 0; l < g.n_layers; ++l)
@@ -11078,18 +11023,6 @@ int main(int argc, char** argv) {
     if (dump != nullptr && std::fclose(dump) != 0) {
         basalt::log::error("basalt generate", "cannot finish logits dump");
         return 1;
-    }
-    if (layer_dump != nullptr) {
-        std::fclose(layer_dump);
-        cudaFreeHost(layer_stage);
-        std::printf("%-24s %s (%lld layers + the input x %d streams x %lld per position)\n", "layers dumped",
-                    o.dump_layers.c_str(), (long long) g.n_layers, (int) g.hc, (long long) g.n_embd);
-    }
-    if (half_dump != nullptr) {
-        std::fclose(half_dump);
-        cudaFreeHost(half_stage);
-        std::printf("%-24s %s (%lld layers x %llu per position)\n", "halves dumped", o.dump_halves.c_str(),
-                    (long long) g.n_layers, (unsigned long long) half_stride);
     }
     if (routing != nullptr) {
         std::fclose(routing);
