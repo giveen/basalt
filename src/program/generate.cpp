@@ -7,6 +7,7 @@
 // on the same ids on both sides.
 
 #include "engine_local.hpp"
+#include "measure/dump_set.hpp"
 #include "measure/gpu_modes.hpp"
 #include "serve/loans.hpp"
 #include "basalt/program/options.hpp"
@@ -71,7 +72,6 @@
 #include "basalt/prefill/gemm.hpp"
 #include "basalt/prefill/prefill.hpp"
 #include "basalt/core/native_dense.hpp"
-#include "basalt/program/logits_selection.hpp"
 #include "basalt/program/conv_cache.hpp"
 #include "basalt/program/ppl_gate.hpp"
 #include "basalt/program/probe_rates.hpp"
@@ -405,8 +405,6 @@ void usage() {
                  "  --greedy             argmax (the default)\n"
                  "  --seed S             enable sampling with this Philox seed\n"
                  "  --top-k N --top-p F --temperature F\n"
-                 "  --dump-logits PATH   write one line of raw logits per position\n"
-                 "  --logits-stride N    store every Nth row plus final input (default 1); N>1 requires --max-new 1\n"
                  "  --dump-residual PATH write the final R (hc x n_embd, f32) for head bisection\n"
 
                  "  --dump-routing PATH  write the routed expert ids and weights per layer per position\n"
@@ -965,7 +963,6 @@ int main(int argc, char** argv) {
     Options o;
     std::string ppl_base, ppl_out;
     bool have_tokens = false;
-    bool have_logits_stride = false;
     for (int i = 1; i < argc; ++i) {
         const std::string a = argv[i];
         auto next = [&](const char* what) -> const char* {
@@ -1010,14 +1007,6 @@ int main(int argc, char** argv) {
         else if (a == "--top-k") o.top_k = std::atoi(next("--top-k"));
         else if (a == "--top-p") o.top_p = (float) std::atof(next("--top-p"));
         else if (a == "--temperature") o.temperature = (float) std::atof(next("--temperature"));
-        else if (a == "--dump-logits") o.dump_logits = next("--dump-logits");
-        else if (a == "--logits-stride") {
-            if (have_logits_stride) { basalt::log::error("basalt", "--logits-stride must be supplied only once"); return 2; }
-            if (!basalt::program::logits_selection::parse_stride(next("--logits-stride"), o.logits_stride)) {
-                basalt::log::error("basalt", "--logits-stride requires a positive decimal int64"); return 2;
-            }
-            have_logits_stride = true;
-        }
         else if (a == "--dump-residual") o.dump_residual = next("--dump-residual");
         else if (a == "--dump-mixed") o.dump_mixed = next("--dump-mixed");
         else if (a == "--dump-routing") o.dump_routing = next("--dump-routing");
@@ -1538,10 +1527,6 @@ int main(int argc, char** argv) {
             basalt::log::error("basalt generate", "%s: %s", o.model.c_str(), e.what());
             return 2;
         }
-    }
-    if (o.logits_stride > 1 && (o.max_new != 1 || o.dump_logits.empty())) {
-        basalt::log::error("basalt generate", "--logits-stride > 1 requires --max-new 1 and --dump-logits");
-        return 2;
     }
     // positions, cells and pooled-block indices are cast to int32 on the device path.
     if (o.max_context > 2147483647LL - 8) {
@@ -3732,30 +3717,6 @@ int main(int argc, char** argv) {
                          (unsigned long long) sp.seed);
     }
 
-    std::FILE* dump = nullptr;
-    // The logits header is written WITH THE FIRST ROW, not at open: a header promising rows that were never
-    // written is worse than no file.
-    int32_t hdr[2] = {0, 0};
-    bool hdr_written = false;
-    const int64_t dump_positions = (int64_t) o.tokens.size() - 1 + o.max_new;
-    if (!o.dump_logits.empty()) {
-        if (dump_positions > INT32_MAX || n_vocab > INT32_MAX) {
-            basalt::log::error("basalt generate", "logits dump dimensions exceed int32");
-            return 2;
-        }
-        dump = std::fopen(o.dump_logits.c_str(), "wb");
-        if (dump == nullptr) {
-            basalt::log::error("basalt generate", "cannot write %s", o.dump_logits.c_str());
-            return 1;
-        }
-        // THE COUNT IS `n_prompt - 1 + max_new`, NOT `n_prompt + max_new`.  The loop writes one row per position from
-        // 0, and it stops once `produced` holds `max_new` tokens - and `produced` only starts receiving at position
-        // `n_prompt - 1`.  So a 5-token prompt with `--max-new 6` writes 10 rows.  The header must describe the file
-        // that was written: anything reading the count instead of the size would otherwise get a wrong answer that
-        // looks authoritative.
-        const int32_t n_rows = (int32_t) basalt::program::logits_selection::row_count(dump_positions, o.logits_stride);
-        hdr[0] = n_vocab; hdr[1] = n_rows;
-    }
 
     // ---- THE LAYER ORACLE: ONE RESIDUAL SNAPSHOT PER LAYER PER POSITION, so the engine can be bisected against
     // `llama-debug`'s `l_last-<il>` node instead of against a single end-to-end perplexity.  The buffer is
@@ -10782,10 +10743,6 @@ int main(int argc, char** argv) {
                         (double) mtp.vram_bytes() / 1048576.0);
     }
 
-    if (dump != nullptr && std::fclose(dump) != 0) {
-        basalt::log::error("basalt generate", "cannot finish logits dump");
-        return 1;
-    }
     if (routing != nullptr) {
         std::fclose(routing);
         drive.routing = nullptr;
@@ -10807,51 +10764,7 @@ int main(int argc, char** argv) {
         std::printf("%-24s %lld tokens in %.1f ms  ->  %.2f tok/s  (time to first token %.1f ms)\n", "prefill",
                     (long long) (n_prompt - 1), prefill_ms,
                     prefill_ms > 0 ? 1000.0 * (double) (n_prompt - 1) / prefill_ms : 0.0, ttft_ms);
-    if (!o.dump_mixed.empty()) {
-        std::vector<float> mx((size_t) g.n_embd);
-        if (cudaMemcpy(mx.data(), ss.block.mixed, mx.size() * sizeof(float), cudaMemcpyDeviceToHost) !=
-            cudaSuccess) {
-            basalt::log::error("basalt generate", "reading mixed back failed");
-            return 1;
-        }
-        std::FILE* mf = std::fopen(o.dump_mixed.c_str(), "wb");
-        if (mf == nullptr) {
-            basalt::log::error("basalt generate", "cannot write %s", o.dump_mixed.c_str());
-            return 1;
-        }
-        std::fwrite(mx.data(), sizeof(float), mx.size(), mf);
-        std::fclose(mf);
-        double s2 = 0, mag = 0;
-        for (float v : mx) { s2 += (double) v * (double) v; mag += std::fabs((double) v); }
-        std::printf("%-24s %s (n_embd %lld, rms %.5g, mean|.| %.5g)\n", "mixed dumped", o.dump_mixed.c_str(),
-                    (long long) g.n_embd, std::sqrt(s2 / (double) mx.size()), mag / (double) mx.size());
-    }
-
-    // ---- the residual, for bisecting the head against the layers (see `dump_residual`'s note)
-    if (!o.dump_residual.empty()) {
-        std::vector<float> R((size_t) g.hc * g.n_embd);
-        if (cudaMemcpy(R.data(), ss.R, R.size() * sizeof(float), cudaMemcpyDeviceToHost) != cudaSuccess) {
-            basalt::log::error("basalt generate", "reading R back failed");
-            return 1;
-        }
-        std::FILE* rf = std::fopen(o.dump_residual.c_str(), "wb");
-        if (rf == nullptr) {
-            basalt::log::error("basalt generate", "cannot write %s", o.dump_residual.c_str());
-            return 1;
-        }
-        const int32_t hdr[2] = {(int32_t) g.hc, (int32_t) g.n_embd};
-        std::fwrite(hdr, sizeof hdr, 1, rf);
-        std::fwrite(R.data(), sizeof(float), R.size(), rf);
-        std::fclose(rf);
-        double mag = 0, mx = 0;
-        int bad = 0;
-        for (float v : R) {
-            if (!std::isfinite(v)) ++bad;
-            else { mag += std::fabs((double) v); mx = std::max(mx, (double) std::fabs((double) v)); }
-        }
-        std::printf("%-24s %s (%d x %lld, nonfinite %d, mean|.| %.4g, max|.| %.4g)\n", "residual dumped",
-                    o.dump_residual.c_str(), (int) g.hc, (long long) g.n_embd, bad, mag / (double) R.size(), mx);
-    }
+    if (const int rc = basalt::program::measure::write_host_dumps({&o, &g, &ss}, err); rc != 0) return rc;
 
     if (o.stats) {
         std::printf("%-24s %.3f ms/token (WALL CLOCK: embed, layers, head, sample)\n", "  per token", decode_ms);
@@ -10938,7 +10851,6 @@ int main(int argc, char** argv) {
         }
     }
 
-    if (dump != nullptr) std::printf("%-24s %s\n", "logits dumped", o.dump_logits.c_str());
 
     basalt::core::session_graphs_free(gr);
     basalt::core::doorbell_free(db);

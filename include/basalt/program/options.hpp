@@ -22,8 +22,6 @@ struct Options {
     int top_k = 20;
     float top_p = 0.95f;
     float temperature = 1.0f;
-    std::string dump_logits;          // one line of logits per generated position
-    int64_t logits_stride = 1;        // storage selection; all prompt tokens remain conditioned
     /// THE CONTEXT EXTENSION (rope scaling, rope_scaling.hpp).  These knobs resolve to ONE process config,
     /// set once before `session_init` builds the rope table and the graphs capture the kernels.  There is
     /// deliberately no per-request form: K sits in the cache POST-RoPE, so one cache must never mix two
