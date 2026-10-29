@@ -8,6 +8,7 @@
 
 #include "engine_local.hpp"
 #include "cli/arguments.hpp"
+#include "cli/control_vectors.hpp"
 #include "measure/dump_set.hpp"
 #include "measure/gpu_modes.hpp"
 #include "serve/loans.hpp"
@@ -514,80 +515,6 @@ bool checkpoint_restore(const ConvCheckpoint& c, basalt::core::SessionState& ss,
     return false;
 }
 
-// --control-vector-scaled: llama.cpp's `common_control_vector_load` (every file's `direction.<l>` times its scale,
-// summed; layer 0 has none) and `llama_adapter_cvec::apply` with the projection-mode patch (project: the unit
-// direction and its norm as the scale), into the tables `cvec_upload` takes.  `summary` is what INFO reports.
-bool load_control_vectors(const Options& o, const basalt::core::ModelGeometry& g, std::string& summary, std::string& err) {
-    const int64_t L = g.n_layers, N = g.n_embd;
-    std::vector<float> data((size_t) (L * N), 0.0f);
-    std::vector<bool> have((size_t) L, false);
-    for (const auto& [path, scale] : o.cvec_files) {
-        try {
-            basalt::GgufFile f(path);
-            const basalt::MetaValue* arch = f.get("general.architecture");
-            if (arch == nullptr || arch->s != "controlvector") {
-                err = path + ": not a control vector GGUF (general.architecture is not 'controlvector')";
-                return false;
-            }
-            const basalt::MetaValue* hint = f.get("controlvector.model_hint");
-            if (hint != nullptr && hint->s != "qwen4exp")
-                basalt::log::warn("basalt generate", "%s was made for '%s', not qwen4exp", path.c_str(), hint->s.c_str());
-            int found = 0;
-            for (const basalt::TensorInfo& t : f.tensors()) {
-                if (t.name.rfind("direction.", 0) != 0) continue;
-                const long l = std::strtol(t.name.c_str() + 10, nullptr, 10);
-                if (l < 1 || l >= L) continue;   // layer 0 has no vector; past the model is ignored, as in llama.cpp
-                if (t.type != 0 || t.elements() != (uint64_t) N) {
-                    err = path + ": " + t.name + " must be " + std::to_string((long long) N) + " f32";
-                    return false;
-                }
-                const float* src = reinterpret_cast<const float*>(f.tensor_data(t));
-                for (int64_t j = 0; j < N; ++j) data[(size_t) (l * N + j)] += scale * src[j];
-                have[(size_t) l] = true;
-                ++found;
-            }
-            if (found == 0) { err = path + ": no direction.<layer> tensors"; return false; }
-        } catch (const std::exception& e) {
-            err = e.what();
-            return false;
-        }
-    }
-    const int first = o.cvec_first <= 0 ? 1 : o.cvec_first;
-    const int last = (o.cvec_last <= 0 || o.cvec_last >= L) ? (int) L - 1 : o.cvec_last;
-    const int single = o.cvec_mode == 0 ? o.cvec_single : -1;
-    if (single >= 0 && (single >= L || !have[(size_t) single])) {
-        err = "--cvec-dir single:" + std::to_string(single) + ": the vector has no direction for that layer";
-        return false;
-    }
-    std::vector<float> dir((size_t) (L * N), 0.0f), s((size_t) L, 0.0f);
-    int steered = 0;
-    for (int64_t l = first; l <= last; ++l) {
-        const int64_t src = single >= 0 ? single : l;
-        if (!have[(size_t) src]) continue;
-        const float* d = data.data() + (size_t) (src * N);
-        if (o.cvec_mode == 0) {
-            double nrm = 0.0;
-            for (int64_t j = 0; j < N; ++j) nrm += (double) d[j] * d[j];
-            nrm = std::sqrt(nrm);
-            if (nrm <= 0.0) continue;
-            s[(size_t) l] = (float) nrm;
-            for (int64_t j = 0; j < N; ++j) dir[(size_t) (l * N + j)] = (float) (d[j] / nrm);
-        } else {
-            s[(size_t) l] = 1.0f;
-            std::copy(d, d + N, dir.begin() + (size_t) (l * N));
-        }
-        ++steered;
-    }
-    if (steered == 0) { err = "the control vector has no direction in layers " + std::to_string(first) + ".." + std::to_string(last); return false; }
-    if (!basalt::kernels::cvec_upload(dir, s, o.cvec_mode, first, last, N, g.hc, err)) return false;
-    summary = std::string(o.cvec_mode == 0 ? "project" : "add") + ":" + std::to_string(first) + "-" + std::to_string(last) +
-              (single >= 0 ? ":single" + std::to_string(single) : "");
-    // the line llama.cpp's patched build prints, so a log shows the same thing
-    basalt::log::info("basalt generate", "control vector mode = %s, dir = %s, layers %d..%d (%d steered)",
-                 o.cvec_mode == 0 ? "project" : "add", single >= 0 ? "single" : "per-layer", first, last, steered);
-    return true;
-}
-
 // The effective host->device bandwidth of the PCIe link: copies from pinned host memory, as the expert arena's
 // reads are.  The native default share (0.55) suits a x16 link; a x8 card in a x8 slot carries about half of that.
 // Returns < 0 when the probe cannot run (then the caller keeps the default).
@@ -952,30 +879,9 @@ int main(int argc, char** argv) {
     basalt::core::qsa_set_kv_int8(o.kv == "int8");
     basalt::core::qsa_set_kv_q4(o.kv == "q4_0");   // 4-bit codes after a Hadamard rotation (kv_q4.hpp)
     basalt::core::qsa_set_kv_hybrid(o.kv == "k8v4");   // K8V4: INT8 K + rotated Q4_0 V, 816 B/cell
-    if (o.kv_resident < 0) {
-        basalt::log::error("basalt generate", "--kv-resident must be >= 0");
-        return 2;
-    }
-    if (o.kv == "k8v4" && o.kv_resident > 0) {
-        basalt::log::error("basalt generate", "--kv k8v4 does not support --kv-resident streaming (yet)");
-        return 2;
-    }
+    if (const auto code = cli::validate_kv_streaming(o)) return *code;
     basalt::core::qsa_set_kv_resident(o.kv_resident);
-    // --serve with --spec 0 or 1: no speculation.  The drafter is not loaded, prompt lookup is off, and every step
-    // is a one-token window through the verify path.
-    const bool no_spec = o.serve && o.spec < 2;
-    if (no_spec) {
-        o.spec = 1;   // one-token windows; the verifier is still sized for 2 or more tokens
-        o.suffix_draft = 0;
-        o.mtp.clear();
-    }
-    // Prompt lookup (the suffix drafter, on by default): the MTP keeps its --spec windows and a lookup window may be
-    // up to 2 tokens longer (at most the verifier width); the draft policy (basalt/spec/draft_policy.hpp) takes one only where it pays.
-    // --suffix-draft 0 turns it off.
-    if (o.suffix_draft > 0 && o.spec >= 2 && o.mtp_max_t == 0) {
-        o.mtp_max_t = o.spec;
-        o.spec = std::min(o.spec + 2, 8);   // kVerifyMaxT
-    }
+    const bool no_spec = cli::normalize_speculation_options(o);
     basalt::core::layer_set_shared_early(true);
     {
         // the source tensors hold the PLE table
@@ -1622,7 +1528,7 @@ int main(int argc, char** argv) {
     std::string cvec_summary = "0";
     if (!o.cvec_files.empty()) {
         std::string ce;
-        if (!load_control_vectors(o, g, cvec_summary, ce)) {
+        if (!cli::load_control_vectors(o, g, cvec_summary, ce)) {
             basalt::log::error("basalt generate", "control vector: %s", ce.c_str());
             return 2;
         }
