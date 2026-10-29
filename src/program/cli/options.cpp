@@ -181,4 +181,35 @@ std::optional<int> validate_generation_options(const Options& o, bool multi_gpu,
     return std::nullopt;
 }
 
+std::optional<int> validate_kv_streaming(const Options& o) {
+    if (o.kv_resident < 0) {
+        basalt::log::error("basalt generate", "--kv-resident must be >= 0");
+        return 2;
+    }
+    if (o.kv == "k8v4" && o.kv_resident > 0) {
+        basalt::log::error("basalt generate", "--kv k8v4 does not support --kv-resident streaming (yet)");
+        return 2;
+    }
+    return std::nullopt;
+}
+
+bool normalize_speculation_options(Options& o) {
+    // --serve with --spec 0 or 1: no speculation.  The drafter is not loaded, prompt lookup is off, and every step
+    // is a one-token window through the verify path.
+    const bool no_spec = o.serve && o.spec < 2;
+    if (no_spec) {
+        o.spec = 1;   // one-token windows; the verifier is still sized for 2 or more tokens
+        o.suffix_draft = 0;
+        o.mtp.clear();
+    }
+    // Prompt lookup (the suffix drafter, on by default): the MTP keeps its --spec windows and a lookup window may be
+    // up to 2 tokens longer (at most the verifier width); the draft policy (basalt/spec/draft_policy.hpp) takes one only where it pays.
+    // --suffix-draft 0 turns it off.
+    if (o.suffix_draft > 0 && o.spec >= 2 && o.mtp_max_t == 0) {
+        o.mtp_max_t = o.spec;
+        o.spec = std::min(o.spec + 2, 8);   // kVerifyMaxT
+    }
+    return no_spec;
+}
+
 }  // namespace basalt::program::cli
