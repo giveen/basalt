@@ -1,6 +1,8 @@
-#include "arguments.hpp"
+#include "options.hpp"
+#include "help.hpp"
 
 #include "basalt/kernels/rope_scaling.hpp"
+#include "basalt/kernels/sampler.hpp"
 #include "basalt/log.hpp"
 #include "basalt/program/options.hpp"
 
@@ -210,6 +212,28 @@ bool normalize_speculation_options(Options& o) {
         o.spec = std::min(o.spec + 2, 8);   // kVerifyMaxT
     }
     return no_spec;
+}
+
+basalt::kernels::SamplerParams sampling_options(const Options& o) {
+    basalt::kernels::SamplerParams sp;
+    sp.greedy = o.greedy;
+    sp.seed = o.seed;
+    sp.top_k = o.top_k;
+    sp.top_p = o.top_p;
+    sp.temperature = o.temperature;
+    // what this run actually samples with (the speculative loop below gets the same parameters); serve samples
+    // per request instead
+    if (!o.serve) {
+        if (sp.greedy || sp.temperature <= 0.0f)
+            basalt::log::info("basalt generate", "sampling greedy");
+        else
+            basalt::log::info("basalt generate", "sampling temperature=%g top_k=%d top_p=%g seed=%llu",
+                         (double) sp.temperature, sp.top_k > 0 && sp.top_k < 64 ? sp.top_k : 64, (double) sp.top_p,
+                         (unsigned long long) sp.seed);
+    }
+
+
+    return sp;
 }
 
 }  // namespace basalt::program::cli

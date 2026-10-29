@@ -1,4 +1,6 @@
 #include "arguments.hpp"
+#include "help.hpp"
+#include "tokens.hpp"
 
 #include "basalt/core/diag.hpp"
 #include "basalt/log.hpp"
@@ -7,35 +9,12 @@
 #include <algorithm>
 #include <charconv>
 #include <cstdlib>
-#include <fstream>
-#include <iterator>
 #include <sstream>
 
 namespace basalt::program::cli {
 namespace {
 constexpr float kRelaxedDraftingDefault = 0.5f;
 }
-
-bool parse_i64_list(const char* s, std::vector<int64_t>& out, std::string& err) {
-    out.clear();
-    std::string text(s);
-    for (char& c : text) if (c == ',') c = ' ';
-    std::istringstream input(text);
-    std::string token;
-    while (input >> token) {
-        int32_t id = 0;
-        const auto parsed = std::from_chars(token.data(), token.data() + token.size(), id);
-        if (parsed.ec != std::errc{} || parsed.ptr != token.data() + token.size() || id < 0) {
-            err = "invalid token id: expected an integer in [0, 2147483647]";
-            out.clear();
-            return false;
-        }
-        out.push_back(id);
-    }
-    if (out.empty()) { err = "token list was empty"; return false; }
-    return true;
-}
-
 
 std::optional<int> parse_options(int argc, char** argv, Options& o, std::string& ppl_base, std::string& ppl_out) {
     bool have_tokens = false;
@@ -57,14 +36,7 @@ std::optional<int> parse_options(int argc, char** argv, Options& o, std::string&
         }
         else if (a == "--tokens-file") {
             if (have_tokens) { basalt::log::error("basalt", "supply one token input only"); return 2; }
-            std::ifstream input(next("--tokens-file"));
-            if (!input) { basalt::log::error("basalt", "cannot open token file"); return 2; }
-            std::string text((std::istreambuf_iterator<char>(input)), std::istreambuf_iterator<char>());
-            if (input.bad()) { basalt::log::error("basalt", "cannot read token file"); return 2; }
-            std::string error;
-            if (text.find('\0') != std::string::npos || !parse_i64_list(text.c_str(), o.tokens, error)) {
-                basalt::log::error("basalt", "malformed token file: %s", error.c_str()); return 2;
-            }
+            if (const auto code = load_tokens_file(next("--tokens-file"), o.tokens)) return *code;
             have_tokens = true;
         }
         else if (a == "--max-new") o.max_new = std::atoll(next("--max-new"));
