@@ -22,7 +22,7 @@ serving; `Flow::quit` runs shutdown and flushes the disk cache.
 | Decode and speculative verification | `request_decode.cpp` |
 | Completion, slot admission and reports | `request_finish.cpp` |
 | Checkpoints, parking and disk persistence | `conversation.cpp` |
-| Prompt setup, loans and refills | `prompt.cpp`, `loans.cpp` |
+| Prompt setup, loans and refills | `prompt.cpp`, `loans.cpp`, `loan_moves.cpp` |
 | Prompt reads, splits and verify windows | `prompt_read.cpp`, `prompt_split.cpp`, `prompt_windows.cpp` |
 | Verify setup and graph capture | `verify.cpp` |
 | RAM admission and VRAM controls | `memory.cpp` |

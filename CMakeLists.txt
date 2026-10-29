@@ -435,6 +435,7 @@ add_executable(basalt src/program/generate.cpp src/program/engine_local.cpp src/
                        src/program/serve/conversation.cpp
                        src/program/serve/kv.cpp
                        src/program/serve/loans.cpp
+                       src/program/serve/loan_moves.cpp
                        src/program/serve/memory.cpp
                        src/program/serve/prompt.cpp
                        src/program/serve/prompt_read.cpp
@@ -1009,6 +1010,13 @@ target_link_libraries(image_loan_test PRIVATE engine_session warnings)
 basalt_embed_manifest(image_loan_test)
 basalt_cpu_test(NAME image_loan_test COMMAND image_loan_test)
 set_tests_properties(image_loan_test PROPERTIES TIMEOUT 60)
+# a prompt loan's table work: the re-lend split and the routed experts' trades, on a model of the cache (CPU only)
+add_executable(loan_moves_test tests/program/loan_moves_test.cpp src/program/serve/loan_moves.cpp)
+target_include_directories(loan_moves_test PRIVATE src/program/serve)
+target_link_libraries(loan_moves_test PRIVATE warnings)
+basalt_embed_manifest(loan_moves_test)
+basalt_cpu_test(NAME loan_moves_test COMMAND loan_moves_test)
+set_tests_properties(loan_moves_test PROPERTIES TIMEOUT 60)
 add_executable(auto_plan_test tests/program/auto_plan_test.cpp)
 target_link_libraries(auto_plan_test PRIVATE engine_session warnings)
 basalt_embed_manifest(auto_plan_test)

@@ -11,41 +11,48 @@ int64_t Runtime::cache_floor_slots() {
     return std::min<int64_t>(f, xcache.full_slots());
 }
 
-bool Runtime::move_routed_below(int64_t first, const char* why, std::string& e) {
+bool Runtime::move_routed_below(int64_t first, const char* why, std::string& e,
+                                const std::vector<serve_loans::LentEntry>* lent_out) {
+
     if (drive.d.usage.empty() || srcp != &src || !src.complement_ready() || multi_gpu || first <= 0 ||
         first >= xcache.slots())
         return true;
     const auto t0 = Clock::now();
     const auto& lay = basalt::kernels::cpu::expert_layout();
-    int64_t moved = 0, routed = 0;
-    std::vector<int32_t> hot, cold;
+    int64_t moved = 0, routed = 0, from_ram = 0;
+    std::vector<uint8_t> out_of;
+    if (lent_out != nullptr && !lent_out->empty()) {
+        out_of.assign(host_res.size(), 0);
+        for (const auto& [i, slot] : *lent_out) out_of[(size_t) i] = 1;
+    }
+    std::vector<uint8_t> in_ram((size_t) g.n_expert);
+    std::vector<serve_loans::RoutedTrade> trades;
     for (int64_t l = 0; l < g.n_layers; ++l) {
         const float* u = drive.d.usage.data() + (size_t) (l * g.n_expert);
         int32_t* r = host_res.data() + (size_t) (l * g.n_expert);
-        hot.clear();
-        cold.clear();
-        for (int32_t ex = 0; ex < (int32_t) g.n_expert; ++ex) {
-            if (r[ex] >= first) {
-                if (u[ex] > 0.0f) hot.push_back(ex);
-            } else if (r[ex] >= 0 && src.has_resident(l, ex)) {
-                cold.push_back(ex);
+        for (int64_t ex = 0; ex < g.n_expert; ++ex) in_ram[(size_t) ex] = src.has_resident(l, ex) ? 1 : 0;
+        trades.clear();
+        routed += serve_loans::plan_routed_trades(u, r, in_ram.data(),
+                                                  out_of.empty() ? nullptr : out_of.data() + (size_t) (l * g.n_expert),
+                                                  (int32_t) g.n_expert, first, trades);
+        for (const serve_loans::RoutedTrade& t : trades) {
+            const void* from = xcache.device_slot(t.from);
+            cudaMemcpyKind kind = cudaMemcpyDeviceToDevice;
+            if (t.from_ram) {
+                if ((from = srcp->blob(l, t.hot)) == nullptr) {
+                    e = "moving an expert out of the cache's tail: its RAM copy is gone";
+                    return false;
+                }
+                kind = cudaMemcpyHostToDevice;
+                ++from_ram;
             }
-        }
-        routed += (int64_t) hot.size();
-        if (hot.empty() || cold.empty()) continue;
-        std::sort(hot.begin(), hot.end(), [&](int32_t a, int32_t b) { return u[a] > u[b]; });
-        std::sort(cold.begin(), cold.end(), [&](int32_t a, int32_t b) {
-            return u[a] != u[b] ? u[a] < u[b] : r[a] > r[b];   // then the profile's coldest
-        });
-        for (size_t k = 0; k < hot.size() && k < cold.size() && u[hot[k]] > u[cold[k]]; ++k) {
-            const int32_t sh = r[hot[k]], sc = r[cold[k]];
-            if (cudaMemcpyAsync(xcache.device_slot(sc), xcache.device_slot(sh), (size_t) lay.blob_bytes(l),
-                                cudaMemcpyDeviceToDevice, adapt_stream) != cudaSuccess) {
+            if (cudaMemcpyAsync(xcache.device_slot(t.to), from, (size_t) lay.blob_bytes(l), kind, adapt_stream) !=
+                cudaSuccess) {
                 e = std::string("moving an expert out of the cache's tail: ") + cudaGetErrorString(cudaGetLastError());
                 return false;
             }
-            r[hot[k]] = sc;
-            r[cold[k]] = sh;
+            r[t.hot] = t.to;
+            r[t.cold] = t.from;
             ++moved;
         }
     }
@@ -53,9 +60,10 @@ bool Runtime::move_routed_below(int64_t first, const char* why, std::string& e) 
         e = std::string("moving experts out of the cache's tail: ") + cudaGetErrorString(cudaGetLastError());
         return false;
     }
+    const std::string ram_note = from_ram > 0 ? std::to_string(from_ram) + " from RAM, " : std::string();
     basalt::log::info("basalt batch", "%s: %lld of the %lld routed experts in the cache's last %lld slots moved "
-                         "below them (%.1f ms)", why, (long long) moved, (long long) routed,
-                 (long long) (xcache.slots() - first),
+                         "below them (%s%.1f ms)", why, (long long) moved, (long long) routed,
+                 (long long) (xcache.slots() - first), ram_note.c_str(),
                  std::chrono::duration<double, std::milli>(Clock::now() - t0).count());
     return true;
 }

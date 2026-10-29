@@ -156,6 +156,7 @@ bool Request::lend(int64_t tokens, std::string& e, int64_t chunk, int64_t head) 
     for (PfPart& p : runtime_.pf_parts) {
         if (p.first < 0) continue;
         const int32_t first = std::max<int32_t>(p.first, (int32_t) (p.cache->slots() - runtime_.part_slots(p, want)));
+        std::vector<serve_loans::LentEntry> again;   // entries whose slots the prompt path still holds
         if (!p.lent.empty()) {
             if (want <= p.lent_chunk && p.sp->ring_depth() == ring_now && !ov_copied &&
                 (fixed_chunk <= 0 || want == p.sp->chunk()))
@@ -164,12 +165,10 @@ bool Request::lend(int64_t tokens, std::string& e, int64_t chunk, int64_t head) 
             // overwritten by the new layout): only their table entries go back, and the loop below
             // lends them again; the new loan's refill brings their experts back after the prompt
             if (!ov_copied) {
-                std::vector<std::pair<int32_t, int32_t>> back;
-                for (const auto& [i, slot] : p.lent) {
-                    if (slot >= first) runtime_.host_res[(size_t) i] = slot;
-                    else back.emplace_back(i, slot);
-                }
-                p.lent = std::move(back);
+                serve_loans::LoanSplit split = serve_loans::split_loan(p.lent, first);
+                for (const auto& [i, slot] : split.again) runtime_.host_res[(size_t) i] = slot;
+                again = std::move(split.again);
+                p.lent = std::move(split.back);
             }
             // ONLY this participant's loan goes back: `refill` would return the other participants'
             // loans too, and their buffers are still laid out in their caches - marking those slots
@@ -180,7 +179,7 @@ bool Request::lend(int64_t tokens, std::string& e, int64_t chunk, int64_t head) 
         if (beside && &p == &runtime_.pf_parts[0] && p.lent.empty()) {
             if (runtime_.ba_job) { runtime_.ba_thr.join(); runtime_.ba_job = false; }   // no adaptive copy lands in a slot it moves
             if (!runtime_.xq_drain()) { e = "an adaptive refill failed"; return false; }
-            if (!runtime_.move_routed_below(first, "prompt loan", e)) return false;
+            if (!runtime_.move_routed_below(first, "prompt loan", e, &again)) return false;
             any = true;
         }
         if (want != p.sp->chunk() || first != p.first_now || p.sp->ring_depth() != ring_now) {

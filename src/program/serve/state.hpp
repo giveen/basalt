@@ -4,6 +4,7 @@
 #include "runtime.hpp"
 #include "../cli/tokens.hpp"
 #include "loans.hpp"
+#include "loan_moves.hpp"
 #include "basalt/program/options.hpp"
 #include "basalt/program/community_row.hpp"
 #include "basalt/kernels/cvec.hpp"
@@ -415,7 +416,8 @@ private:
     bool home_given_up(int64_t live, std::string& e);
     bool vram_command(const std::string& cmd, std::string& e, bool for_sleep, std::string* reply = nullptr);
     int64_t cache_floor_slots();
-    bool move_routed_below(int64_t first, const char* why, std::string& e);
+    bool move_routed_below(int64_t first, const char* why, std::string& e,
+                           const std::vector<serve_loans::LentEntry>* lent_out = nullptr);
     bool kv_drain(std::string& e);
     bool cache_regrow(std::string& e);
     bool kv_fit(basalt::core::SessionState& s, int64_t cells, std::string& e, bool shrink = true, int64_t min_cells = -1);
