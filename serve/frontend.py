@@ -480,26 +480,33 @@ _QUOTED_OPEN = re.compile(r"<function=[^<>\s]+>\s*(?:<parameter=|</function>)")
 
 def param_end(text: str, final: bool = False, name: str | None = None) -> int:
     """Find a structural parameter close, keeping quoted calls and a reopened parameter inside its value.
-    -1: none yet; -2: candidate awaiting its follower (`final` accepts it)."""
+    -1: none yet; -2: candidate awaiting more output. `final` falls back to the plain structural close."""
     at = text.find(PARAM_END)
+    fallback = -1
     while at >= 0:
-        if len(_QUOTED_OPEN.findall(text, 0, at)) <= text.count(FUNC_END, 0, at):
-            after = text[at + len(PARAM_END):].lstrip()
-            if after.startswith(PARAM_START):
-                gt = after.find(">")
-                if gt < 0:
-                    return at if final else -2
-                if name is None or after[len(PARAM_START):gt].strip() != name:
-                    return at
-            elif after.startswith(FUNC_END):
-                return at
-            elif not after or PARAM_START.startswith(after) or FUNC_END.startswith(after):
-                return at if final else -2
+        after = text[at + len(PARAM_END):].lstrip()
+        candidate = -1
+        if after.startswith(PARAM_START):
+            gt = after.find(">")
+            if gt < 0:
+                candidate = at if final else -2
+            elif name is None or after[len(PARAM_START):gt].strip() != name:
+                candidate = at
+        elif after.startswith(FUNC_END):
+            candidate = at
+        elif not after or PARAM_START.startswith(after) or FUNC_END.startswith(after):
+            candidate = at if final else -2
+        if candidate != -1:
+            if len(_QUOTED_OPEN.findall(text, 0, at)) <= text.count(FUNC_END, 0, at):
+                return candidate
+            if fallback < 0:
+                fallback = at
         at = text.find(PARAM_END, at + 1)
-    return -1
+    # An unclosed quoted function must not hide the enclosing call at end of output.
+    return fallback if final else (-2 if fallback >= 0 else -1)
 
 
-def call_end(text: str) -> int:
+def call_end(text: str, final: bool = False) -> int:
     """Where a call body ends: the `</tool_call>` after its own `</function>` (found via param_end); -1: incomplete.
     A body not in the call format ends at the first `</tool_call>`."""
     s = text.lstrip()
@@ -518,7 +525,7 @@ def call_end(text: str) -> int:
             gt = text.find(">", pos)
             if gt < 0:
                 return -1
-            end = param_end(text[gt + 1:], name=text[pos:gt].split("=", 1)[1].strip())
+            end = param_end(text[gt + 1:], final=final, name=text[pos:gt].split("=", 1)[1].strip())
             if end < 0:
                 return -1
             pos = gt + 1 + end + len(PARAM_END)
@@ -696,7 +703,7 @@ class OutputParser:
         self.spname = ""
         self.svstart = 0
 
-    def _scan(self) -> list[Event]:
+    def _scan(self, final: bool = False) -> list[Event]:
         """Advance the streaming view of the call body."""
         out = []
 
@@ -751,7 +758,7 @@ class OutputParser:
                         rest = rest[1:]
                     self.sval_started = True
                     self.svstart = self.sp
-                end = param_end(self.buf[self.svstart:], name=self.spname) if PARAM_END in rest else -1
+                end = param_end(self.buf[self.svstart:], final=final, name=self.spname) if PARAM_END in rest else -1
                 end = end - (self.sp - self.svstart) if end >= 0 else end
                 if end >= 0:
                     value = rest[:end]
@@ -770,7 +777,7 @@ class OutputParser:
                     self.sp += safe
                 return out
             elif self.ss == "raw":
-                end = param_end(rest, name=self.spname)
+                end = param_end(rest, final=final, name=self.spname)
                 if end < 0:
                     return out
                 value = rest[:end]
@@ -825,7 +832,7 @@ class OutputParser:
                     best = max(best, n)
         return best
 
-    def feed(self, delta: str) -> list[Event]:
+    def feed(self, delta: str, *, final: bool = False) -> list[Event]:
         self.buf += delta
         out: list[Event] = []
         while True:
@@ -883,15 +890,15 @@ class OutputParser:
                 self.buf = self.buf[i + len(CALL_START):]
                 self.state = "call"
             else:
-                i = call_end(self.buf)
+                i = call_end(self.buf, final=final)
                 if self.stream_tools:
                     if i >= 0:
                         whole, self.buf = self.buf, self.buf[:i]     # scan only the body
-                        out += self._scan()
+                        out += self._scan(final=final)
                         out += self._close_scan()
                         self.buf = whole
                     else:
-                        out += self._scan()
+                        out += self._scan(final=final)
                 if i < 0:
                     return out
                 body = self.buf[:i]
@@ -907,9 +914,8 @@ class OutputParser:
     def finish(self) -> list[Event]:
         """End of generation: flush what is held (an unterminated call becomes content; an announced one is left
         unfinished with no "tool_call")."""
-        out = []
+        out = self.feed("", final=True)
         if self.state == "call" and self.stream_tools and self.scall is not None:
-            out += self._scan()                 # ended inside an announced call
             if self.ss == "done":               # only </tool_call> is missing
                 out.append(Event("tool_call", call=self.scall))
             self.buf = ""
