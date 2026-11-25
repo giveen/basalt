@@ -78,9 +78,9 @@ struct Bufs {
     int32_t *pos = nullptr, *tokd = nullptr, *ident = nullptr, *dbounds = nullptr;
 };
 
-void carve(Carve& c, Bufs& b, const Geometry& g) {
+void carve(Carve& c, Bufs& b, const Geometry& g, bool guidance) {
     const size_t E = (size_t) g.n_embd, R = kChunk, P = R * (size_t) g.n_used;
-    for (float*& p : b.role) p = c.take<float>(R * E);
+    for (int i = 0; i < (guidance ? kBufs : kPlainBufs); ++i) b.role[i] = c.take<float>(R * E);
     b.resid = c.take<float>(R * E);
     // the attention's buffers
     const size_t arena = c.at;
@@ -177,7 +177,7 @@ public:
     }
 
     bool init(std::string& err) {
-        if (!walk(g_, walk_, err)) return false;
+        if (!walk(g_, walk_, err, m_.loopcd() > 0.f)) return false;
         {   // the runs of visits on each card (walk.hpp)
             std::vector<int> card_of((size_t) g_.n_layers);
             for (int l = 0; l < g_.n_layers; ++l) card_of[(size_t) l] = m_.card_of(l);
@@ -257,7 +257,7 @@ public:
     // The current card's chunk buffers and products.
     bool init_lane(std::string& err) {
         Carve c;
-        carve(c, b(), g_);
+        carve(c, b(), g_, m_.loopcd() > 0.f);
         if (cudaMalloc(&lane().mem, c.at) != cudaSuccess) {
             cudaGetLastError();
             err = "out of device memory for the prompt path (" + std::to_string(c.at >> 20) + " MiB)";
@@ -265,7 +265,7 @@ public:
         }
         c = Carve{};
         c.base = static_cast<uint8_t*>(lane().mem);
-        carve(c, b(), g_);
+        carve(c, b(), g_, m_.loopcd() > 0.f);
         mmq::iota(b().ident, (int64_t) kChunk * g_.n_used, strm());
         // the sorted entries past the ones a chunk fills (pairs another card computes are left out) read as row 0 of expert 0
         const size_t pair_bytes = (size_t) kChunk * g_.n_used * 4;
@@ -459,6 +459,9 @@ private:
             if (gi > 0) cross(segs_[gi - 1].card, sg, rows);
             for (size_t si = sg.s0; si < sg.s1; ++si) {
                 const Step& s = walk_.steps[si];
+                if (s.guide)
+                    loopcd_hidden(buf(s.blocks[s.n_blocks - 1]), buf(s.hid), buf(Buf::RefMid), buf(Buf::RefOut),
+                                  rows, m_.loopcd(), strm());
                 if (const int k = ds_->slot_of_visit(s.visit); k >= 0) {   // the drafter's features: the visit's input rows
                     if (cur_ == 0) cudaMemcpyAsync(ds_->tap(k), buf(s.hid), (size_t) rows * E * 4, cudaMemcpyDeviceToDevice, strm());
                     else tap_across(k, buf(s.hid), rows);
@@ -466,6 +469,11 @@ private:
                 step_ = (int) si;
                 if (!layer(s, rows, pos0)) {
                     err = staging_failed();
+                    return false;
+                }
+                if (s.save_reference && cudaMemcpyAsync(buf(s.reference), buf(s.out), (size_t) rows * E * 4,
+                                                        cudaMemcpyDeviceToDevice, strm()) != cudaSuccess) {
+                    err = "saving a LoopCD reference failed";
                     return false;
                 }
             }
@@ -912,10 +920,10 @@ std::unique_ptr<PromptRunner> make_prompt(InklingModel& m, void* stream, std::st
     return p;
 }
 
-uint64_t prompt_bytes(const Geometry& g) {
+uint64_t prompt_bytes(const Geometry& g, bool guidance) {
     Carve c;
     Bufs b;
-    carve(c, b, g);
+    carve(c, b, g, guidance);
     return (uint64_t) c.at + kMmqSpare;
 }
 

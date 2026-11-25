@@ -109,6 +109,29 @@ int main() {
         check(m->parse_flag(argv[1], args, *o, code) && code == 0 && o->route.tail_skip == 3, "--route-tail-skip 3 is taken");
         check(m->finish_flags(*o).value_or(0) == 2, "--route-tail-skip without the pack's experts per token is refused");
     }
+    if (const model::ModelAdapter* ink = model::find_adapter("inkling2")) {
+        check(lossy_of(*ink, {}).empty() && lossy_of(*ink, {"--diag-loopcd", "0"}).empty(),
+              "LoopCD is disabled by default and at zero strength");
+        {
+            const auto o = ink->make_options();
+            o->diag_loopcd = 0.3f;
+            o->batch = 2;
+            check(ink->finish_flags(*o).value_or(0) == 2, "LoopCD refuses unqualified multi-session batching");
+        }
+        const auto guided = lossy_of(*ink, {"--diag-loopcd", "0.3"});
+        check(guided.size() == 1 && guided[0].flag == "--diag-loopcd", "guidance reports changed output");
+        for (const char* value : {"0", "0.3", "1", "-0.1", "1.1", "nan", "inf", "0.3junk", ""}) {
+            const auto o = ink->make_options();
+            std::vector<std::string> words = {"basalt", "--diag-loopcd", value};
+            std::vector<char*> argv;
+            for (auto& w : words) argv.push_back(w.data());
+            int i = 1, code = 0;
+            model::FlagArgs args((int) argv.size(), argv.data(), i);
+            const bool parsed = ink->parse_flag(argv[1], args, *o, code);
+            const bool valid = std::string(value) == "0" || std::string(value) == "0.3" || std::string(value) == "1";
+            check(parsed && i == 2 && (code == 0) == valid, "LoopCD validates the complete finite strength");
+        }
+    }
     if (const model::ModelAdapter* d = model::find_adapter("qwen35")) {
         const auto o = d->make_options();
         std::vector<std::string> words = {"basalt", "--route-prior"};

@@ -3,8 +3,8 @@
 // A forward keeps one buffer of rows per role below. Each visit reads its input, the finished blocks before it and, in the
 // loop's later passes, the message bank; it writes its output where the next visit needs it kept: the layer before a block
 // boundary writes straight into the buffer that becomes a finished block (or the bank), every other layer alternates two
-// buffers. No step's output overwrites a buffer read later, so a forward copies nothing. The decode forward and the prompt
-// forward both follow it.
+// buffers. No step's output overwrites a buffer read later. Optional guidance snapshots the first pass's two block states
+// and extrapolates the final pair at the coda. The decode forward and the prompt forward both follow it.
 #pragma once
 
 #include "basalt/models/inkling2/kernels.hpp"
@@ -26,8 +26,11 @@ enum class Buf : uint8_t {
     I18,      ///< the coda's input (the last pass's output), a finished block
     H0,       ///< every other layer's output, alternately
     H1,
+    RefMid,   ///< the first pass's second-block input, kept until the coda
+    RefOut,   ///< the first pass's output, kept until the coda
 };
-constexpr int kBufs = 8;
+constexpr int kPlainBufs = (int) Buf::RefMid;
+constexpr int kBufs = (int) Buf::RefOut + 1;
 
 struct Step {
     int visit = 0;               ///< index into Geometry::visits
@@ -37,6 +40,9 @@ struct Step {
     Buf blocks[kMaxMix] = {};
     bool msgs = false;           ///< a later pass of the loop: its inputs take messages mixed from the bank
     Buf bank[2] = {};            ///< the previous pass's input of the loop's second block, and its output
+    bool save_reference = false; ///< copy this step's output into reference after the layer
+    Buf reference = Buf::RefMid;
+    bool guide = false;          ///< extrapolate the coda's two pass-dependent inputs before the layer
 };
 
 struct Walk {
@@ -64,6 +70,6 @@ int split_handoffs(const Geometry& g, int cut);
 
 /// The walk of one forward over `g`'s visits. False with `err` for a layout it does not cover: it takes a prelude of one
 /// block, a loop of two blocks and a coda of one block (Inkling 2 Mini's 6 + 12 x passes + 6 layers).
-bool walk(const Geometry& g, Walk& w, std::string& err);
+bool walk(const Geometry& g, Walk& w, std::string& err, bool guidance = false);
 
 }  // namespace basalt::models::inkling2

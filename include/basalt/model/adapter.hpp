@@ -107,6 +107,7 @@ struct LoadRequest {
     RopeFlags rope;                   ///< the rope scaling flags, for a model that takes them (rope_flags.hpp)
     RouteFlags route;                 ///< the lossy routing flags, for a model that takes them (route_flags.hpp)
     int64_t kv_resident = 0;          ///< --kv-resident: K/V cells per attention layer kept in VRAM (0: all)
+    float diag_loopcd = 0.f;          ///< diagnostic: fixed hidden-state contrast at the coda, zero disables it
     int diag_rows = 0;                ///< diagnostic: rows of one forward call of a prompt (0: the model's own chunk)
 };
 
@@ -294,6 +295,8 @@ class LoadedModel {
 public:
     virtual ~LoadedModel() = default;
     virtual const ModelDesc& desc() const = 0;
+    /// Model-specific computation settings that affect saved KV/state; empty preserves the default store identity.
+    virtual std::string state_identity() const { return {}; }
     /// The context the loaded model runs with, when it sizes that itself (0: the caller's --max-context stands).
     virtual int64_t context() const { return 0; }
     /// Everything the model will hold is decided and allocated, in the order its sizing depends on (its weights, then what

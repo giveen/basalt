@@ -59,6 +59,7 @@ public:
             const auto t0 = Clock::now();
             std::string text = "basalt conversation state " + model_.desc().arch + " vision_in_engine " + (o.vision_in_engine ? "1" : "0");
             if (const std::string rope = basalt::model::rope_flag_words(o.rope); !rope.empty()) text += " " + rope;
+            if (const std::string state = model_.state_identity(); !state.empty()) text += " " + state;
             const uint64_t identity = basalt::core::conversation_store_hash_file(
                 o.model, basalt::core::conversation_store_hash(text.data(), text.size(), 1));
             std::string de;

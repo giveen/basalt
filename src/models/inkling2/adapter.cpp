@@ -10,6 +10,7 @@
 #include "models/inkling2/meta.hpp"
 #include "models/inkling2/model.hpp"
 
+#include <cmath>
 #include <cstdlib>
 
 namespace basalt::models::inkling2 {
@@ -51,9 +52,19 @@ public:
     const char* community_quant() const override { return "NVFP4"; }   // NVFP4 experts, Q8_0 dense
 
     // --kv: attention caches as fp16 (default), fp8 or scaled int8; --spec, --draft-log: drafter windows
-    bool parse_flag(const std::string& a, model::FlagArgs& args, program::CommonOptions& o, int&) const override {
+    bool parse_flag(const std::string& a, model::FlagArgs& args, program::CommonOptions& o, int& code) const override {
         if (a == "--kv") {
             o.kv = args.next("--kv");
+            return true;
+        }
+        if (a == "--diag-loopcd") {
+            char* end = nullptr;
+            const char* value = args.next("--diag-loopcd");
+            o.diag_loopcd = std::strtof(value, &end);
+            if (end == value || *end || !std::isfinite(o.diag_loopcd) || o.diag_loopcd < 0.f || o.diag_loopcd > 1.f) {
+                basalt::log::error("basalt inkling2", "--diag-loopcd needs a finite strength in [0, 1]");
+                code = 2;
+            }
             return true;
         }
         return dspark_parse_flag(a, args, o);   // DSPARK HOOK
@@ -65,6 +76,12 @@ public:
             return 2;
         }
         dspark_finish_flags(o);   // DSPARK HOOK
+        if (o.diag_loopcd > 0.f && (o.spec >= 2 || o.batch > 1)) {
+            basalt::log::error("basalt inkling2", "--diag-loopcd requires one session and --spec 0 or 1; draft and batch parity are unqualified");
+            return 2;
+        }
+        if (o.diag_loopcd > 0.f)
+            o.lossy.push_back({"--diag-loopcd", "experimental hidden-state guidance changes the output distribution"});
         return std::nullopt;
     }
 

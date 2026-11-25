@@ -28,10 +28,11 @@ struct Reads {
 };
 
 // The copying forward: the prelude's output in its own buffer, the bank's two entries, the kept inputs.
-std::vector<Reads> reference(const Geometry& g, int& final_hid, std::vector<int>& final_blocks) {
+std::vector<Reads> reference(const Geometry& g, int& final_hid, std::vector<int>& final_blocks, bool guidance) {
     std::vector<Reads> out;
     std::vector<int> blocks, pre_blocks;
     int hid = kEmb, pre = 0, bank_out = 0, i12[2] = {0, 0}, bank = 0;
+    int first_mid = 0, first_out = 0;
     for (size_t i = 0; i < g.visits.size(); ++i) {
         const Visit& v = g.visits[i];
         const int l = v.layer;
@@ -45,6 +46,14 @@ std::vector<Reads> reference(const Geometry& g, int& final_hid, std::vector<int>
                 blocks = pre_blocks;
             }
             hid = pre;
+        }
+        if (guidance) {
+            if (l == g.loop_start && v.pass == 1) first_out = bank_out;
+            if (l == g.loop_start + g.block && v.pass == 0) first_mid = hid;
+            if (l == g.loop_end) {
+                blocks.back() = 2 * blocks.back() - first_mid;
+                hid = 2 * hid - first_out;
+            }
         }
         Reads r;
         r.hid = hid;
@@ -66,7 +75,7 @@ std::vector<Reads> reference(const Geometry& g, int& final_hid, std::vector<int>
     return out;
 }
 
-void check(int layers, int block, int passes) {
+void check(int layers, int block, int passes, bool guidance = false) {
     Geometry g;
     g.n_layers = layers;
     g.block = block;
@@ -76,14 +85,14 @@ void check(int layers, int block, int passes) {
     g.visits = loop_visits(layers, g.loop_start, g.loop_end, passes);
     Walk w;
     std::string err;
-    if (!walk(g, w, err)) {
+    if (!walk(g, w, err, guidance)) {
         std::fprintf(stderr, "FAIL walk: %s\n", err.c_str());
         ++failures;
         return;
     }
     int ref_final = 0;
     std::vector<int> ref_blocks;
-    const std::vector<Reads> ref = reference(g, ref_final, ref_blocks);
+    const std::vector<Reads> ref = reference(g, ref_final, ref_blocks, guidance);
     expect(w.steps.size() == g.visits.size(), "a step per visit", 0);
     int buf[kBufs];
     for (int& b : buf) b = -2;   // nothing written yet
@@ -91,6 +100,11 @@ void check(int layers, int block, int passes) {
     for (size_t i = 0; i < w.steps.size() && i < ref.size(); ++i) {
         const Step& s = w.steps[i];
         const int vi = (int) i;
+        if (s.guide) {
+            expect(g.visits[i].layer == g.loop_end && s.n_blocks == 3, "complete coda interface", vi);
+            buf[(int) s.hid] = 2 * buf[(int) s.hid] - buf[(int) Buf::RefOut];
+            buf[(int) s.blocks[s.n_blocks - 1]] = 2 * buf[(int) s.blocks[s.n_blocks - 1]] - buf[(int) Buf::RefMid];
+        }
         expect(s.visit == vi, "visit order", vi);
         expect(buf[(int) s.hid] == ref[i].hid, "input", vi);
         expect(s.n_blocks == (int) ref[i].blocks.size(), "block count", vi);
@@ -103,6 +117,7 @@ void check(int layers, int block, int passes) {
         }
         expect(s.out != s.hid, "output over its own input", vi);
         buf[(int) s.out] = vi;
+        if (s.save_reference) buf[(int) s.reference] = vi;
     }
     expect(buf[(int) w.final_hid] == ref_final, "the head's input", -1);
     expect(w.n_blocks == (int) ref_blocks.size(), "the head's block count", -1);
@@ -112,7 +127,7 @@ void check(int layers, int block, int passes) {
 
 // The split walk over two cards: each card's buffers hold what its own steps wrote and what its segments pulled; every
 // read on a card must find the value the one-card walk reads, and a later pass's messages must be mixed on the card first.
-void check_split(int cut) {
+void check_split(int cut, bool guidance = false) {
     Geometry g;
     g.n_layers = 24;
     g.block = 6;
@@ -122,7 +137,7 @@ void check_split(int cut) {
     g.visits = loop_visits(24, 6, 18, 3);
     Walk w;
     std::string err;
-    if (!walk(g, w, err)) return;
+    if (!walk(g, w, err, guidance)) return;
     std::vector<int> card_of(24, 0);
     for (int l = cut; l < 24; ++l) card_of[(size_t) l] = 1;
     const std::vector<Segment> segs = split_walk(g, w, card_of);
@@ -140,6 +155,12 @@ void check_split(int cut) {
         for (size_t i = sg.s0; i < sg.s1; ++i) {
             const Step& s = w.steps[i];
             const int vi = (int) i, pass = g.visits[i].pass;
+            if (s.guide) {
+                for (int* state : {one, mine}) {
+                    state[(int) s.hid] = 2 * state[(int) s.hid] - state[(int) Buf::RefOut];
+                    state[(int) s.blocks[s.n_blocks - 1]] = 2 * state[(int) s.blocks[s.n_blocks - 1]] - state[(int) Buf::RefMid];
+                }
+            }
             expect(card_of[(size_t) g.visits[i].layer] == sg.card, "a step on its layer's card", vi);
             expect(mine[(int) s.hid] == one[(int) s.hid], "split input", vi);
             for (int j = 0; j < s.n_blocks; ++j) expect(mine[(int) s.blocks[j]] == one[(int) s.blocks[j]], "split block", vi);
@@ -150,6 +171,7 @@ void check_split(int cut) {
             }
             if (s.msgs) expect(mixed[sg.card] == pass, "this pass's messages on the card", vi);
             one[(int) s.out] = mine[(int) s.out] = vi;
+            if (s.save_reference) one[(int) s.reference] = mine[(int) s.reference] = vi;
         }
         next = sg.s1;
         if (sg.head) {
@@ -166,7 +188,12 @@ void check_split(int cut) {
 }  // namespace
 
 int main() {
-    for (int cut = 1; cut < 24; ++cut) check_split(cut);
+    for (int cut = 1; cut < 24; ++cut) {
+        check_split(cut);
+        check_split(cut, true);
+    }
+    for (int passes : {2, 3, 4, 5}) check(24, 6, passes, true);
+    check(8, 2, 5, true);
     {
         Geometry g;
         g.n_layers = 24;
@@ -185,6 +212,14 @@ int main() {
     }
     check(24, 6, 3);   // Inkling 2 Mini
     check(24, 6, 1);
+    {
+        Geometry g;
+        g.n_layers = 24; g.block = 6; g.loop_start = 6; g.loop_end = 18; g.loop_passes = 1;
+        g.visits = loop_visits(24, 6, 18, 1);
+        Walk w;
+        std::string err;
+        expect(!walk(g, w, err, true), "guidance refuses a single pass", -1);
+    }
     check(24, 6, 2);
     check(24, 6, 4);
     check(8, 2, 5);

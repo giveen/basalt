@@ -205,6 +205,86 @@ The previous INT8 row-writer parity matched the CPU reference for 257 rows of wi
 
 ## Drafting
 
-The DSpark drafter only proposes; the target checks every draft, and a decode row rounds the same in any window. Greedy output
-with drafting equals plain greedy output (prose, struct and conversation, after short and 16K-token prompts, and a
-2,405-token prompt checked).
+The DSpark drafter only proposes; the target checks every draft. Greedy identity has been checked on prose, struct and
+conversation fixtures after short and 16K-token prompts, and a 2,405-token prompt.
+
+A cold request for a JSON array of twenty integer ids and their squares at 8K capacity is a counterexample: plain decoding
+and an eight-token draft window differ at generated-token index 30 (zero-based, including control tokens), with all experts
+on the GPU. The preserved baseline and the disabled-guidance build both show it; within either window mode their 256-token
+outputs match each other. This does not qualify universal drafted/plain identity, independently of LoopCD.
+
+
+## Experimental loop guidance
+
+The fixed hidden-state [LoopCD](https://arxiv.org/html/2610.02185v1#S3) diagnostic is off by default. It keeps the first
+core pass's midpoint and output, and extrapolates the final pair before the coda as `strong + strength * (strong - first)`.
+The embedding and prelude states stay unchanged. This paired-state interpretation accounts for Inkling's attention
+residuals; it has not been established as the recipe behind Apple's separate Inkling results.
+
+The raw loop messages are unchanged. Guidance applies to every prompt and decode row, so the coda's KV and convolution
+state follow the guided computation throughout the prefix. The diagnostic requires one session and drafting disabled:
+the batch-conformance check fails with and without guidance, and drafted/plain greedy identity is not qualified.
+Use `--diag-loopcd 0.3 --spec 1 --batch 1` for a fixed-strength diagnostic run; unsupported combinations are refused.
+Saved conversations on disk use a separate identity for each nonzero strength. Zero strength uses the original walk and
+allocations, with no reference buffers or guidance launch.
+
+The diagnostic retains all three core passes and uses one coda and one head. Its two reference rows take 18 KiB per token
+in flight: 144 KiB for an eight-row decode window and 72 MiB for a 4,096-row prompt chunk, per layer-split card. These are
+scratch buffers, not a context-length-dependent cache. Logit-space and adaptive guidance are not part of this path.
+
+Paired quality screening on the NVFP4-MX8 pack, RTX 5090 at 475 W, FP16 KV, fixed `--expert-cache 3072` placement, twenty
+512-token chunks and three-row verify windows:
+
+| Fixed strength | PPL | Mean KLD against the unguided reference | Top-1 agreement |
+| --- | ---: | ---: | ---: |
+| Disabled | 7.6584 | 0.00243 | 97.90% |
+| 0.1 | 7.6748 | 0.00372 | 97.61% |
+| 0.3 | 7.7379 | 0.01136 | 95.63% |
+
+All 5,100 disabled diagnostic rows match the pre-change binary's scored rows exactly, and on the current tree the disabled
+full-depth run reproduces all 164 HumanEval outputs byte for byte. Nonzero guidance changes the target
+distribution intentionally; higher KLD here measures that change, not agreement with a guided implementation reference.
+The full 100-chunk check (25,500 scored rows, otherwise the same setup) gives PPL 7.0693, mean KLD 0.00302 and
+97.79% top-1 agreement disabled; strength 0.3 gives PPL 7.1411, mean KLD 0.01174 and 95.58% top-1 agreement.
+These scores do not establish a task-quality improvement or justify a default change.
+
+All 164 HumanEval tasks, greedy decoding, the pack's chat template with reasoning disabled, a 4,096-token output cap,
+and the same fixed placement give 158/164 passes (96.34%) disabled versus 155/164 (94.51%) at strength 0.3. Guidance fixes
+two tasks and breaks five (paired exact McNemar p=0.453); this is not a demonstrated improvement or significant decline.
+Five disabled and eight guided outputs still hit the cap. At the initial 1,024-token cap, scores were 144/164 versus
+136/164, with every failure capped. Extending all capped outputs preserved their first 1,024 tokens exactly. These are
+cap-dependent pass@1 results with the standard HumanEval tests and a three-second test timeout, not uncapped accuracy.
+At the strength the paper uses for models behind a coda layer (1.0) the same run gives 158/164: two tasks break and two
+fix (paired exact McNemar p=1.000), while every one of the 164 outputs differs from the disabled run. Guidance changes the
+text at both ends of the range without measurably changing whether it is correct.
+
+Reduced depth is not a usable trade for this model. Rewriting the pack's `loop.count` from 3 to 2 (every weight section
+unchanged) leaves 36 layer visits instead of 48, and the unguided score falls from 158/164 to 18/164: 140 tasks lost,
+none gained, 123 outputs that never end their message and 135 at the 4,096-token cap, a mean 3,449 tokens against 706.
+The paper's half-depth penalty of 0.17 to 1.29 points is measured on four families whose recurrence is elastic; a third of
+Inkling 2 Mini's loop is not a depth the model can be read from. LoopCD's compute saving does not apply here, so only the
+fixed-depth scores are meaningful.
+
+An offline logit-space reference uses the same weights with one core pass and its own full-prefix coda state. On one
+512-token prefix (255 scored rows), PPL is 5.2182 unguided, 5.2637 for hidden strength 0.3, 5.4837 for fixed logit strength
+0.3 and 5.7599 for adaptive logit guidance with cap 0.5. This small screening comparison does not qualify a runtime
+logit-space implementation or establish downstream quality. The original model pack is unchanged.
+
+An ABBA comparison at 475 W, all 3,072 experts resident, FP16 KV, plain decoding and seed 123 uses the standard
+conversation, struct and prose fixture order. The benchmark driver reports 0.5.6 and the engine 0.5.7; the intervening
+driver changes concern multi-GPU selection, which this single-GPU run does not use.
+
+| Fixture | Disabled ms/window | Strength 0.3 ms/window | Disabled passes/s | Guided passes/s |
+| --- | ---: | ---: | ---: | ---: |
+| Conversation | 4.323 | 4.277 | 231.35 | 233.81 |
+| Struct | 4.584 | 4.598 | 218.16 | 217.47 |
+| Prose | 4.193 | 4.213 | 238.51 | 237.34 |
+
+The changes are within the two-run spread, not a demonstrated speedup. Guidance changes output lengths: conversation
+1,200 to 1,087 tokens and prose 955 to 1,072; struct stays at its 8,192-token cap. The fixture labelled 16K actually reads
+15,810 tokens in both arms: 827.05 ms disabled versus 829.05 ms guided. These are generated trajectories, not fixed-text work.
+
+The guidance kernel takes 0.884 µs for eight rows (501 GB/s logical traffic) and 117.1 µs for 4,096 rows
+(1,934 GB/s logical traffic, including cache hits). Against double-precision CPU arithmetic, maximum absolute error is
+7.15e-7; the large maximum relative error near zero comes from cancellation. Rows alone and in wider calls match bitwise,
+as do graph replays. Standalone sm_120 compilation totals 0.95 s across the `nvcc --time` phases.

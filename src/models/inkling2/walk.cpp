@@ -5,10 +5,14 @@
 
 namespace basalt::models::inkling2 {
 
-bool walk(const Geometry& g, Walk& w, std::string& err) {
+bool walk(const Geometry& g, Walk& w, std::string& err, bool guidance) {
     if (g.block <= 0 || g.loop_start != g.block || g.loop_end - g.loop_start != 2 * g.block ||
         g.n_layers - g.loop_end != g.block || g.loop_passes < 1) {
         err = "the forward takes a prelude of one block, a loop of two blocks and a coda of one block";
+        return false;
+    }
+    if (guidance && g.loop_passes < 2) {
+        err = "LoopCD needs at least two complete core passes";
         return false;
     }
     w = Walk{};
@@ -38,6 +42,11 @@ bool walk(const Geometry& g, Walk& w, std::string& err) {
         else if (nx && nx->layer == g.loop_start + g.block) s.out = mid(nx->pass);
         else if (nx && nx->layer == g.loop_end) s.out = Buf::I18;
         else s.out = hid == Buf::H0 ? Buf::H1 : Buf::H0;
+        if (guidance && v.pass == 0 && (l == g.loop_start + g.block - 1 || l == g.loop_end - 1)) {
+            s.save_reference = true;
+            s.reference = l == g.loop_end - 1 ? Buf::RefOut : Buf::RefMid;
+        }
+        s.guide = guidance && l == g.loop_end;
         w.steps.push_back(s);
         if (g.boundary(l)) blocks.push_back(hid);   // the layer's input joins the finished blocks
         // a later pass reads the prelude's output again, not the previous pass's
@@ -78,6 +87,12 @@ std::vector<Segment> split_walk(const Geometry& g, const Walk& w, const std::vec
         }
         need(sg, s.hid);
         for (int i = 0; i < s.n_blocks; ++i) need(sg, s.blocks[i]);
+        if (s.guide) {
+            need(sg, Buf::RefMid);
+            need(sg, Buf::RefOut);
+            valid[(int) s.hid] = valid[(int) s.blocks[s.n_blocks - 1]] = (uint8_t) (1u << card);
+        }
+        if (s.save_reference) valid[(int) s.reference] = (uint8_t) (1u << card);
         sg.mix_msgs.push_back(mix ? 1 : 0);
         sg.s1 = si + 1;
         valid[(int) s.out] = (uint8_t) (1u << card);

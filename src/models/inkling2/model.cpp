@@ -24,7 +24,9 @@
 #include <cuda_runtime.h>
 
 #include <algorithm>
+#include <bit>
 #include <chrono>
+#include <cmath>
 #include <cstdlib>
 #include <cstring>
 #include <new>
@@ -95,11 +97,16 @@ uint64_t session_bytes(const Geometry& g, int64_t context, bool fp8, bool int8, 
     return caches + kSessionFixed + (uint64_t) kDecodeRows * (uint64_t) g.n_vocab * 4;
 }
 
-uint64_t shared_bytes(const Geometry& g, bool drafter) {
-    return kSharedFixed + prompt_bytes(g) + (drafter ? dspark_tap_bytes(std::max(kDecodeRows, kPromptChunk)) : 0);   // PROMPT, DSPARK HOOKS
+uint64_t shared_bytes(const Geometry& g, bool drafter, bool guidance) {
+    const uint64_t reference = guidance ? 2ull * kDecodeRows * g.n_embd * sizeof(float) : 0;
+    return kSharedFixed + reference + prompt_bytes(g, guidance) + (drafter ? dspark_tap_bytes(std::max(kDecodeRows, kPromptChunk)) : 0);   // PROMPT, DSPARK HOOKS
 }
 
 InklingModel::InklingModel() = default;
+
+std::string InklingModel::state_identity() const {
+    return loopcd() == 0.f ? std::string() : "loopcd-hidden-blocks-v1:" + std::to_string(std::bit_cast<uint32_t>(loopcd()));
+}
 
 InklingModel::~InklingModel() {
     // an upload that may still run keeps everything it reads or writes (and the stream it runs on)
@@ -184,9 +191,15 @@ uint16_t* InklingModel::small_bf16(const std::string& name, uint64_t values, cor
 model::Result InklingModel::plan(const model::LoadRequest& req, core::LoadPlan& reads,
                                  std::vector<std::unique_ptr<model::ModelSession>>& sessions) {
     if (req.paths.empty()) return {model::Status::Error, "inkling2: no model path"};
+    if (!std::isfinite(req.diag_loopcd) || req.diag_loopcd < 0.f || req.diag_loopcd > 1.f)
+        return {model::Status::Error, "inkling2: LoopCD strength must be finite and in [0, 1]"};
+    if (req.diag_loopcd > 0.f && (req.spec >= 2 || req.sessions > 1))
+        return {model::Status::Error, "inkling2: LoopCD requires one session and --spec 0 or 1; draft and batch parity are unqualified"};
     std::string err;
     const std::string& path = req.paths.front();
     if (!open_pack(path, pack_, err)) return {model::Status::Error, "inkling2: " + err};
+    if (req.diag_loopcd > 0.f && pack_.geo.loop_passes < 2)
+        return {model::Status::Error, "inkling2: LoopCD needs at least two complete core passes"};
     flags_ = req;
     if (req.vram_reserve_mib > 0) {
         const int floor = platform::gpu_memory_pages() ? 256 : 128;   // less makes the driver page GPU memory
@@ -399,7 +412,7 @@ model::Result InklingModel::plan(const model::LoadRequest& req, core::LoadPlan& 
         const auto bytes_at = [&](int64_t c) {   // DSPARK HOOK: a session's drafter beside its caches
             return session_bytes(g, c, fp8_, int8_) + (dspark_ ? dspark_session_bytes(pack_, c) : 0);
         };
-        const uint64_t shared = shared_bytes(g, dspark_ != nullptr);
+        const uint64_t shared = shared_bytes(g, dspark_ != nullptr, loopcd() > 0.f);
         if (cut_ > 0) {   // the layer split: each card holds its layers' experts (no spill), checked once they are placed
             if (req.expert_cache > 0) return fail("--expert-cache takes one card; the layer split keeps every expert on its card");
             if (model::Result r = load_experts(reads, file, experts); !r.ok()) return r;
@@ -409,7 +422,7 @@ model::Result InklingModel::plan(const model::LoadRequest& req, core::LoadPlan& 
                 basalt::core::gpu_mem_info(&fb, &tb);
                 const uint64_t need = (session_bytes(g, want, fp8_, int8_, cut_, c) +
                                        (c == 0 && dspark_ ? dspark_session_bytes(pack_, want) : 0)) * n_sess +
-                                      (c == 0 ? shared + spare : shared_bytes(g, false) + kCardSpare);
+                                      (c == 0 ? shared + spare : shared_bytes(g, false, loopcd() > 0.f) + kCardSpare);
                 if (need > fb) {
                     cudaSetDevice(device_);
                     return fail("the layer split at layer " + std::to_string(cut_) + ": card " + std::to_string(card_device(c)) +
@@ -691,8 +704,8 @@ model::SplitSpec InklingModel::split_spec(const model::GpuCards& c) const {
                           (uint64_t) visits[(size_t) l] * visit_cache_bytes(g, l, want, fp8, int8) * n_sess);
     }
     const uint64_t slot_rest = session_bytes(g, want, fp8, int8, g.n_layers, 1);   // a slot's own beyond its caches (no layer on card 1)
-    s.fixed = {kCardSpare + shared_bytes(g, req.spec >= 2) + slot_rest * n_sess + (req.spec >= 2 ? 1000ull << 20 : 0),
-               kCardSpare + shared_bytes(g, false) + slot_rest * n_sess};
+    s.fixed = {kCardSpare + shared_bytes(g, req.spec >= 2, loopcd() > 0.f) + slot_rest * n_sess + (req.spec >= 2 ? 1000ull << 20 : 0),
+               kCardSpare + shared_bytes(g, false, loopcd() > 0.f) + slot_rest * n_sess};
     for (const model::GpuCards::Card& card : c.cards) {
         cudaSetDevice(card.device);
         size_t free_b = 0, total_b = 0;

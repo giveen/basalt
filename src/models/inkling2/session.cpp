@@ -46,6 +46,7 @@
 #include <memory>
 #include <optional>
 #include <set>
+#include <stdexcept>
 #include <string>
 #include <utility>
 #include <vector>
@@ -155,7 +156,7 @@ struct Shared {
         const int64_t E = g.n_embd, R = kMaxRows;
         const int64_t ctx = m.context();
         // the row buffers of one call, by their roles in the walk
-        for (float*& b : x.role_) b = f(R * E);
+        for (int i = 0; i < (m.loopcd() > 0.f ? kBufs : kPlainBufs); ++i) x.role_[i] = f(R * E);
         x.emb_ = f(R * E);
         x.mix_ = f(3 * R * E);
         x.msg_ = f((int64_t) (g.loop_end - g.loop_start) * kStreams * R * E);
@@ -273,7 +274,7 @@ public:
             err = "cannot create a stream";
             return false;
         }
-        if (!walk(g_, walk_, err)) return false;
+        if (!walk(g_, walk_, err, m_.loopcd() > 0.f)) return false;
         {   // the runs of visits on each card (one run, the whole walk, on one card)
             std::vector<int> card_of((size_t) g_.n_layers);
             for (int l = 0; l < g_.n_layers; ++l) card_of[(size_t) l] = m_.card_of(l);
@@ -1058,7 +1059,7 @@ public:
             if (!down(c.k, k.k) || !down(c.v, k.v)) return {model::Status::Error, "inkling2: reading a cache back failed"};
             kv.push_back(std::move(k));
         }
-        if (!dspark_.save_cells(kv, positions, stream_)) return {model::Status::Error, "inkling2: reading the drafter's cache back failed"};   // DSPARK HOOK
+        if (dspark_.on() && !dspark_.save_cells(kv, positions, stream_)) return {model::Status::Error, "inkling2: reading the drafter's cache back failed"};   // DSPARK HOOK
         return {};
     }
 
@@ -1588,6 +1589,10 @@ private:
             for (size_t si = sg.s0; si < sg.s1; ++si) {
                 const Step& s = walk_.steps[si];
                 const Visit& v = g_.visits[(size_t) s.visit];
+                if (s.guide) {
+                    loopcd_hidden(kb(s.blocks[s.n_blocks - 1]), kb(s.hid), kb(Buf::RefMid), kb(Buf::RefOut),
+                                  rows, m_.loopcd(), k.stream);
+                }
                 const float* msgs = nullptr;
                 if (s.msgs) {
                     const int core = g_.loop_end - g_.loop_start;
@@ -1616,6 +1621,8 @@ private:
                 }
                 tapped_in = tap != nullptr;
                 run_layer(v, kb(s.hid), blocks, s.n_blocks, msgs, rows, full_keys, kb(s.out), tap);
+                if (s.save_reference && cudaMemcpyAsync(kb(s.reference), kb(s.out), RE * 4, cudaMemcpyDeviceToDevice, k.stream) != cudaSuccess)
+                    throw std::runtime_error("inkling2: saving a LoopCD reference failed");
             }
         }
         const bool tapped = dspark_.on();   // DSPARK HOOK: the drafter reads every row's final normed state

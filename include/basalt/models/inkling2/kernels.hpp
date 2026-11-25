@@ -49,6 +49,10 @@ struct MixStates {
 void attnres_mix(const MixStates& st, const float* queries, int n_q, int rows, float eps, float* out, int64_t out_stride,
                  void* stream);
 
+/// Fixed LoopCD over the two pass-dependent coda inputs, in place; reference tensors remain unchanged.
+/// Zero strength is an exact no-op and does not read the references.
+void loopcd_hidden(float* mid, float* out, const float* ref_mid, const float* ref_out, int rows, float strength, void* stream);
+
 // ---- loop controllers -------------------------------------------------------------------------------------------------
 
 /// pair[r] = [rms(dest[r]) | rms(msg[r])] (unweighted, eps 1e-6): the controller's [2 kWidth] input.

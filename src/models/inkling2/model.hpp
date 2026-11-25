@@ -66,12 +66,14 @@ public:
                        std::vector<std::unique_ptr<model::ModelSession>>& sessions) override;
     model::Result attach(const model::LoadRequest& req, std::vector<std::unique_ptr<model::ModelSession>>& sessions) override;
     const model::ModelDesc& desc() const override { return desc_; }
+    std::string state_identity() const override;
     int64_t context() const override { return ctx_; }
     std::string gpu_report(int card) const override;
     model::PeerHooks* peer() const override { return peer_ ? const_cast<InklingModel*>(this) : nullptr; }
 
     const Pack& pack() const { return pack_; }
     const Geometry& geo() const { return pack_.geo; }
+    float loopcd() const { return flags_.diag_loopcd; }
     const LayerWeights& layer(int l) const { return layers_[(size_t) l]; }
     const uint8_t* head() const { return head_; }              ///< Q8_0 [n_vocab][n_embd]
     const uint16_t* embedding() const { return embd_dev_; }    ///< BF16 [n_vocab][n_embd], mapped host memory
@@ -354,6 +356,6 @@ std::unique_ptr<model::ModelSession> make_session(InklingModel& model, std::stri
 uint64_t session_bytes(const Geometry& g, int64_t context, bool fp8, bool int8, int cut = 0, int card = 0);
 /// The device bytes every session shares once on a card: the forward's scratch, the prompt path, the drafter's tap (the
 /// first card's).
-uint64_t shared_bytes(const Geometry& g, bool drafter);
+uint64_t shared_bytes(const Geometry& g, bool drafter, bool guidance = false);
 
 }  // namespace basalt::models::inkling2

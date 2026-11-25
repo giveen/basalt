@@ -254,7 +254,7 @@ endif()
 if(BASALT_MODEL_INKLING2)
 add_library(inkling2_kernels STATIC src/models/inkling2/kernels/ops.cu src/models/inkling2/kernels/attn.cu
   src/models/inkling2/kernels/glue.cu src/models/inkling2/kernels/dspark.cu src/models/inkling2/kernels/attn_prompt.cu
-  src/models/inkling2/kernels/prompt_ops.cu)
+  src/models/inkling2/kernels/prompt_ops.cu src/models/inkling2/kernels/loopcd.cu)
 target_include_directories(inkling2_kernels PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_link_libraries(inkling2_kernels PUBLIC ${_gpu_runtime_target})
 add_library(model_inkling2 STATIC src/models/inkling2/adapter.cpp src/models/inkling2/pretok_inkling2.cpp
@@ -264,6 +264,10 @@ add_library(model_inkling2 STATIC src/models/inkling2/adapter.cpp src/models/ink
 target_include_directories(model_inkling2 PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src PRIVATE ${_gpu_include_directories} ${CMAKE_CURRENT_SOURCE_DIR}/src/program/tokenizer)
 target_link_libraries(model_inkling2 PUBLIC model tokenizer engine_session inkling2_kernels tiers kernels kernels_cpu window_gemm mmq prefill_fp4 prefill_mxfp8 prefill_q8 core vision_cuda ${_gpu_runtime_target})
 if(BUILD_TESTING)
+  add_executable(inkling2_loopcd_parity src/models/inkling2/kernels/loopcd_parity.cpp)
+  target_include_directories(inkling2_loopcd_parity PRIVATE ${_gpu_include_directories})
+  target_link_libraries(inkling2_loopcd_parity PRIVATE inkling2_kernels ${_gpu_runtime_target})
+  basalt_gpu_test(NAME inkling2_loopcd_parity COMMAND inkling2_loopcd_parity)
   add_executable(inkling2_kernels_parity src/models/inkling2/kernels/kernels_parity.cpp)
   target_include_directories(inkling2_kernels_parity PRIVATE ${_gpu_include_directories})
   target_link_libraries(inkling2_kernels_parity PRIVATE inkling2_kernels kernels ggml_quants ${_gpu_runtime_target})
