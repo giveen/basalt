@@ -402,7 +402,7 @@ target_link_libraries(model_deepseek4 PUBLIC model tokenizer deepseek4_tokenizer
 if(BUILD_TESTING)
   add_executable(ds4_adapter_test src/models/deepseek4/adapter_test.cpp)
   target_link_libraries(ds4_adapter_test PRIVATE model_deepseek4 warnings)
-  basalt_cpu_test(NAME ds4_adapter_test COMMAND ds4_adapter_test)
+  basalt_gpu_test(NAME ds4_adapter_test COMMAND ds4_adapter_test)
 endif()
 endif()
 
