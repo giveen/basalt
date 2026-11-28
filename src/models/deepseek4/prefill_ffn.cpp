@@ -103,22 +103,18 @@ public:
                   device(shared_hidden_, (size_t) cap_ * g_.n_ff_exp * sizeof(float)) &&
                   device(shared_bounds_, 2 * sizeof(int32_t)) && device(identity_, route_cap_ * sizeof(int32_t)) &&
                   cudaStreamCreateWithFlags(&copy_, cudaStreamNonBlocking) == cudaSuccess;
-        cudaError_t pinned = cudaSuccess;
         for (int i = 0; i < kAheadSlots && ok; ++i) {
             Stage& s = stage_[i];
             ok = device(s.blobs, stage_stride_ * kGroup) &&
                  device(s.bounds, ((size_t) kGroup + 1) * sizeof(int32_t)) &&
                  cudaEventCreateWithFlags(&s.copied, cudaEventDisableTiming) == cudaSuccess &&
                  cudaEventCreateWithFlags(&s.done, cudaEventDisableTiming) == cudaSuccess;
-            if (ok) pinned = cudaHostAlloc(reinterpret_cast<void**>(&s.host), stage_stride_ * kGroup, cudaHostAllocPortable);
-            if (pinned != cudaSuccess) break;
         }
-        if (!ok || pinned != cudaSuccess) {
+        if (!ok) {
             size_t free_b = 0, total_b = 0;
             cudaMemGetInfo(&free_b, &total_b);
             cudaGetLastError();
-            err = "deepseek4: out of memory for the prompt MMQ buffers (" + std::to_string(free_b >> 20) + " MiB free" +
-                  (ok ? std::string(", pinned host: ") + cudaGetErrorString(pinned) : ", device buffers") + ")";
+            err = "deepseek4: out of memory for the prompt MMQ buffers (" + std::to_string(free_b >> 20) + " MiB free)";
             return false;
         }
         rows_host_.resize(route_cap_);
@@ -195,6 +191,7 @@ public:
                     }
                     host_synced = true;
                 }
+                if (!stage_host(D, err)) return false;
                 uint8_t* const host_dst = D.host + stage_stride_ * (size_t) q;
                 if (!weights_.read_expert_blob(l, e, host_dst, (size_t) el.bytes, err)) return false;
                 cudaMemcpyAsync(dst, host_dst, (size_t) el.bytes, cudaMemcpyHostToDevice, copy_);
@@ -454,6 +451,7 @@ public:
                         }
                         host_synced = true;
                     }
+                    if (!stage_host(B, err)) return false;
                     uint8_t* const host_dst = B.host + stage_stride_ * (size_t) q;
                     if (!weights_.read_expert_blob(layer, e, host_dst, (size_t) el.bytes, err)) return false;
                     if (cudaMemcpyAsync(dev_dst, host_dst, (size_t) el.bytes, cudaMemcpyHostToDevice, copy_) != cudaSuccess) {
@@ -639,6 +637,17 @@ public:
 
 
 private:
+    // A stage's pinned buffer for the experts only the file holds, taken by the first such read: with every expert in a
+    // card or the RAM tier none is read from the file, and the RAM the tier was sized beside stays free.
+    uint8_t* stage_host(Stage& s, std::string& err) {
+        if (!s.host && cudaHostAlloc(reinterpret_cast<void**>(&s.host), stage_stride_ * kGroup, cudaHostAllocPortable) != cudaSuccess) {
+            cudaGetLastError();
+            s.host = nullptr;
+            err = "deepseek4: cannot pin the prompt's file staging buffer";
+        }
+        return s.host;
+    }
+
     bool ensure_share_buffers() {
         if (hrows_) return true;
         return cudaHostAlloc(reinterpret_cast<void**>(&hx_), (size_t) kShareTokens * (size_t) g_.n_embd * sizeof(float),
