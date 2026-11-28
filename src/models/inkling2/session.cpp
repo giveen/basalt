@@ -491,7 +491,10 @@ public:
         if (heat_tally_) settle_window(r.pos);
         if (!ensure_positions(r.pos + r.n_tokens, err)) return grow_failed(err);
         if (heat_tally_) {   // the placement changes due at this position, before any row at or past it runs
-            if (rebalances() && next_rebalance_ >= 0 && r.pos >= next_rebalance_) rebalance_copies(r.pos, false);
+            // a request whose part was read in windows (a short one) never went through prefill_chunk, so its start is
+            // here: no rebalance scheduled yet, or one past a rewind
+            if (rebalances() && (next_rebalance_ < 0 || next_rebalance_ > r.pos + kRebalanceRows)) rebalance_copies(r.pos, true);
+            else if (rebalances() && r.pos >= next_rebalance_) rebalance_copies(r.pos, false);
             if (m_.loan_pending() && r.pos >= m_.loan_publish_at() && !publish_loan(r.pos)) return wedged();
             if (m_.wedged()) return wedged();
         }
@@ -561,7 +564,7 @@ public:
         return room == INT64_MAX ? 0 : (int) std::min<int64_t>(room, kWindowRows);
     }
 
-    // ---- batch windows (docs/design/batching.md): several sessions' windows in one pass through the weights, on this
+    // ---- batch windows (docs/architecture/batching.md): several sessions' windows in one pass through the weights, on this
     // session's scratch and stream. Each conversation keeps its caches and rings (the kernels take them per segment), its
     // drafter's context, its logits and its draws; a row gives the bits it gives in its own window.
     int batch_rows() const override { return sh_->max_rows; }
@@ -1574,7 +1577,7 @@ private:
         }
         // the experts
         const bool on_cpu = cpu_ >> l & 1;   // the RAM experts' pairs on the CPU, beside the card's
-        if (on_cpu) {   // open until finish has queued the join: a throw between leaves the fork outside the call's sync
+        if (on_cpu) {   // open until finish is queued: a throw between leaves the fork or ring outside the call's sync
             fork_open_ = true;
             sh_->cpu->rows(l, rows, nrm, k.stream);   // quantized on the host while the router chooses
         }
@@ -1607,7 +1610,7 @@ private:
                                w.blob_table, x.ex_ptr_, x.ex_start_, x.ex_ng_, x.ex_dst_, x.ex_tok_, k.stream,
                                k.ex_tally + (size_t) l * g_.n_expert, k.rec_blobs + (size_t) vi * kAheadExperts, k.rec_n + vi);
         } else {
-            moe_plan(ids, rows, g_.n_used, g_.n_expert, w.blob_table, x.ex_ptr_, x.ex_start_, x.ex_ng_, x.ex_dst_, x.ex_tok_, k.stream,
+            basalt::kernels::moe_plan(ids, rows, g_.n_used, g_.n_expert, w.blob_table, x.ex_ptr_, x.ex_start_, x.ex_ng_, x.ex_dst_, x.ex_tok_, k.stream,
                      k.ex_tally + (size_t) l * g_.n_expert, k.rec_blobs + (size_t) vi * kAheadExperts, k.rec_n + vi);
         }
         if (on_cpu) sh_->cpu->start(l, rows, ids, k.stream);

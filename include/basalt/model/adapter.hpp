@@ -28,6 +28,7 @@ class GgufFile;
 }
 namespace basalt::core {
 struct ConversationKv;
+struct Json;
 class LoadPlan;
 }
 namespace basalt::program {
@@ -183,6 +184,9 @@ public:
     virtual Result resample_row(int row, const float* bias, int32_t& token) { (void) row; (void) bias; (void) token; return {Status::NotImplemented, "this model cannot draw again"}; }
     /// The rows a decode window may hold; 1 when the session drafts nothing.
     virtual int max_window() const { return 1; }
+    /// The rows a teacher-forced verify window (ppl= / score=) may hold, including all rows copy_logits() can read;
+    /// defaults to max_window().
+    virtual int max_verify_window() const { return max_window(); }
     /// True when the last decode_window ran uncaptured or instantiated a new CUDA graph.
     virtual bool window_cold() const { return false; }
     virtual int prompt_fold_window() const { return 1; }
@@ -377,12 +381,20 @@ public:
     virtual int planned_spec(const program::CommonOptions& o) const;
     /// The flags the quality gate starts this model with, space separated.
     virtual const char* quality_flags() const { return ""; }
-    /// The model's name as a community benchmark row records it; empty for a model that has none.
-    virtual const char* model_name() const { return ""; }
+    /// The model's name as a community benchmark row records it, for the pack whose metadata is `gguf_kv`; empty for a
+    /// model that has none.
+    virtual const char* model_name(const core::Json& gguf_kv) const {
+        (void) gguf_kv;
+        return "";
+    }
     /// The KV cache format a community benchmark row runs this model with when it takes no int8; empty: its default.
     virtual const char* community_kv() const { return ""; }
-    /// The quant label of a community row when the pack's name carries none (its name ends in no format word); empty: "unknown".
-    virtual const char* community_quant() const { return ""; }
+    /// The quant label of a community row when the pack's name carries none (its name ends in no format word), for the
+    /// pack whose metadata is `meta`; empty: "unknown".
+    virtual const char* community_quant(const core::Json& meta) const {
+        (void) meta;
+        return "";
+    }
     /// The widest window the gate scores on this model; 0 takes what the request asks.
     virtual int quality_window() const { return 1; }
     /// The most parallel slots (--batch) the model batches: each slot's window takes at least one row of a batch window. A
@@ -398,6 +410,8 @@ public:
         const char* name = "";
         void (*split)(const char* text, size_t size, std::vector<size_t>& ends) = nullptr;
         bool ignore_merges = false;
+        /// SentencePiece's BPE with byte fallback (program::Tokenizer::set_sentencepiece).
+        bool sentencepiece = false;
     };
     virtual PreTokenizer pretokenizer() const = 0;
     virtual program::grammar::ToolForm tool_form() const = 0;

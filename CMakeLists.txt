@@ -250,6 +250,33 @@ if(BUILD_TESTING)
 endif()
 endif()
 
+if(BASALT_MODEL_GEMMA4)
+add_library(gemma4_kernels STATIC src/models/gemma4/kernels/attn.cu src/models/gemma4/kernels/attn_mma.cu
+  src/models/gemma4/kernels/glue.cu)
+target_include_directories(gemma4_kernels PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+target_link_libraries(gemma4_kernels PUBLIC ${_gpu_runtime_target})
+add_library(model_gemma4 STATIC src/models/gemma4/adapter.cpp src/models/gemma4/pack.cpp src/models/gemma4/model.cpp
+  src/models/gemma4/prompt.cpp src/models/gemma4/session.cpp src/models/gemma4/vision.cpp src/models/gemma4/vision_encoder.cpp
+  src/models/gemma4/experts.cpp)
+target_include_directories(model_gemma4 PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src PRIVATE ${_gpu_include_directories})
+target_link_libraries(model_gemma4 PUBLIC model engine_session gemma4_kernels expert_tier tiers kernels kernels_cpu window_gemm prefill_fp8 prefill_fp4 prefill_mxfp8 core
+  vision_cuda ${_gpu_runtime_target})
+if(BUILD_TESTING)
+  add_executable(gemma4_kernels_parity src/models/gemma4/kernels/kernels_parity.cpp)
+  target_include_directories(gemma4_kernels_parity PRIVATE ${_gpu_include_directories})
+  target_link_libraries(gemma4_kernels_parity PRIVATE gemma4_kernels kernels prefill_mxfp8 ${_gpu_runtime_target})
+  basalt_gpu_test(NAME gemma4_kernels_parity COMMAND gemma4_kernels_parity)
+  add_executable(gemma4_vision_test src/models/gemma4/vision_test.cpp src/models/gemma4/vision.cpp)
+  target_include_directories(gemma4_vision_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+  target_link_libraries(gemma4_vision_test PRIVATE vision_core warnings)
+  basalt_cpu_test(NAME gemma4_vision_test COMMAND gemma4_vision_test)
+  # the encoder on the real projector: plans, times and the rows for an outside reference (not a ctest: needs the pack)
+  add_executable(gemma4_vision_parity src/models/gemma4/vision_parity.cpp src/models/gemma4/vision.cpp)
+  target_include_directories(gemma4_vision_parity PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+  target_link_libraries(gemma4_vision_parity PRIVATE vision_cuda)
+endif()
+endif()
+
 if(BASALT_MODEL_ERNIE55)
   include(src/models/ernie55/ernie55.cmake)
 endif()
@@ -462,7 +489,7 @@ basalt_embed_manifest(basalt-gguf)
 add_executable(basalt-dequant src/artifact/dequant.cpp)
 target_link_libraries(basalt-dequant PRIVATE artifact)
 basalt_embed_manifest(basalt-dequant)
-# this file is now nothing but the CLI entry point, and its inherited guard spells that as a "selftest"
+# this file is nothing but the CLI entry point, and its inherited guard spells that as a "selftest"
 target_compile_definitions(basalt-dequant PRIVATE DEQUANT_SELFTEST)
 if(BUILD_TESTING)
   # the reader refuses a duplicate tensor name at open, naming it (a synthetic GGUF: no model, no GPU)
@@ -573,6 +600,7 @@ target_link_libraries(basalt-device PRIVATE core)
 if(BASALT_MODEL_QWEN4EXP)
 add_executable(basalt-load src/models/qwen4exp/plan/load_main.cpp)
 target_link_libraries(basalt-load PRIVATE core kernels)
+basalt_embed_manifest(basalt-load)
 endif()
 
 # Peer-tier compilation: the expert-window decode kernels, the peer prefill mmq/iota kernels and the
@@ -621,6 +649,7 @@ endif()
 # kernels link `artifact` for the scalar dequantizers, because using the VALIDATED scalar path as the
 # reference is the whole point - a kernel checked against another copy of itself proves nothing.
 add_library(kernels STATIC src/kernels/cuda/quantize_act.cu
+                        src/kernels/cuda/expert_plan.cu
                         src/kernels/cuda/sampler.cu
                         src/kernels/cuda/logprobs.cu
                         src/kernels/cuda/elementwise.cu
@@ -946,7 +975,7 @@ if(BUILD_TESTING)
     basalt_cpu_test(NAME ds4_tokenizer_test COMMAND ds4_tokenizer_test)
   endif()
 endif()
-add_executable(basalt-bench src/program/bench_main.cpp)
+add_executable(basalt-bench src/program/bench_main.cpp src/program/quality_suite.cpp)
 basalt_ship_to_bin(basalt-bench)
 # the image encoder sidecar, bin/basalt-vision (its own project, built with this one)
 add_subdirectory(tools/vision)
@@ -970,6 +999,7 @@ if(BUILD_TESTING)
     basalt_gpu_test(NAME hy4_encoder_parity COMMAND hy4_encoder_parity)
   endif()
   basalt_gpu_test(NAME cls_encoder_parity COMMAND cls_encoder_parity)
+  basalt_gpu_test(NAME pool_encoder_parity COMMAND pool_encoder_parity)
   # FFmpeg found at run time, or the reason it is not (any machine: CI has no FFmpeg)
   add_executable(ffmpeg_load_test tests/vision/ffmpeg_load_test.cpp)
   target_link_libraries(ffmpeg_load_test PRIVATE vision_core warnings)
@@ -1292,7 +1322,7 @@ basalt_gpu_test(NAME dec_commit_finisher COMMAND dec_commit_parity --finisher)
 basalt_gpu_test(NAME dec_commit_lazy COMMAND dec_commit_parity --lazy)
 endif()
 # the IQ kernels that decode a weight part once for every column/entry, bitwise vs the per-column ones
-# (GPU, synthetic, no model; --bench adds old/new timings)
+# (GPU, synthetic, no model; --bench adds timings)
 add_executable(iq_multi_parity tests/kernels/iq_multi_parity.cpp)
 target_include_directories(iq_multi_parity PRIVATE ${_gpu_include_directories})
 target_link_libraries(iq_multi_parity PRIVATE kernels ${_gpu_runtime_target})
@@ -1310,8 +1340,8 @@ add_executable(hc8_parity tests/models/qwen4exp/kernels/hc8_parity.cpp)
 target_include_directories(hc8_parity PRIVATE ${_gpu_include_directories})
 target_link_libraries(hc8_parity PRIVATE model_qwen4exp_prefill model_qwen4exp_kernels ${_gpu_runtime_target})
 basalt_gpu_test(NAME hc8_parity COMMAND hc8_parity)
-# native_expert_grouped's group stride and fused SwiGLU + q8_1, bitwise vs the launches before them (GPU, synthetic,
-# no model; --bench adds v1/new timings of a window's 48 calls in a graph)
+# native_expert_grouped's group stride and fused SwiGLU + q8_1, bitwise vs the separate launches (GPU, synthetic,
+# no model; --bench adds timings of a window's calls in a graph)
 add_executable(native_grouped_parity tests/models/qwen4exp/kernels/native_grouped_parity.cpp)
 target_include_directories(native_grouped_parity PRIVATE ${_gpu_include_directories})
 target_link_libraries(native_grouped_parity PRIVATE model_qwen4exp_kernels ${_gpu_runtime_target})
@@ -1567,8 +1597,8 @@ target_include_directories(cvec_parity PRIVATE ${_gpu_include_directories})
 target_link_libraries(cvec_parity PRIVATE model_qwen4exp_kernels ${_gpu_runtime_target})
 basalt_gpu_test(NAME cvec_parity COMMAND cvec_parity)
 
-# The rewritten per-hit and grouped expert kernels vs the previous ones, bitwise (GPU, synthetic, no model).
-# `--bench` adds previous/new timings on engine-like shapes.
+# The per-hit and grouped expert kernels vs the reference ones, bitwise (GPU, synthetic, no model).
+# `--bench` adds timings on engine-like shapes.
 add_executable(s2_expert_grouped_parity tests/models/qwen4exp/kernels/s2_expert_grouped_parity.cpp)
 target_include_directories(s2_expert_grouped_parity PRIVATE ${_gpu_include_directories})
 target_link_libraries(s2_expert_grouped_parity PRIVATE model_qwen4exp_kernels ${_gpu_runtime_target})
@@ -1680,6 +1710,14 @@ target_link_libraries(ppl_gate_test PRIVATE engine_session warnings)
 basalt_embed_manifest(ppl_gate_test)
 basalt_cpu_test(NAME ppl_gate_test COMMAND ppl_gate_test)
 set_tests_properties(ppl_gate_test PROPERTIES TIMEOUT 60)
+
+# quality suite safetensors reader, Basalt row parser, KLD / top-1 / PPL / bootstrap math (CPU only)
+add_executable(quality_suite_test tests/program/quality_suite_test.cpp src/program/quality_suite.cpp)
+target_include_directories(quality_suite_test PRIVATE src/program include)
+target_link_libraries(quality_suite_test PRIVATE platform warnings)
+basalt_embed_manifest(quality_suite_test)
+basalt_cpu_test(NAME quality_suite_test COMMAND quality_suite_test)
+set_tests_properties(quality_suite_test PROPERTIES TIMEOUT 60)
 add_executable(multi_gpu_test tests/model/multi_gpu_test.cpp src/model/multi_gpu.cpp src/model/peer_hooks.cpp src/model/split_hooks.cpp)
 target_include_directories(multi_gpu_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_link_libraries(multi_gpu_test PRIVATE warnings)
@@ -1791,6 +1829,7 @@ endif()
 
 add_executable(loader_test tests/core/loader_test.cpp)
 target_link_libraries(loader_test PRIVATE core ${_gpu_runtime_target})
+basalt_embed_manifest(loader_test)
 basalt_cpu_test(NAME loader_test COMMAND loader_test)
 add_executable(load_progress_test tests/core/load_progress_test.cpp)
 target_link_libraries(load_progress_test PRIVATE platform warnings)
@@ -1810,6 +1849,7 @@ basalt_cpu_test(NAME kv_pool_test COMMAND kv_pool_test)
 add_executable(shipped_profiles_test tests/core/shipped_profiles_test.cpp)
 target_link_libraries(shipped_profiles_test PRIVATE platform)
 target_include_directories(shipped_profiles_test PRIVATE include)
+basalt_embed_manifest(shipped_profiles_test)
 basalt_cpu_test(NAME shipped_profiles_test COMMAND shipped_profiles_test)
 
 add_executable(ple_reader_ram_test tests/ngram/ple_reader_ram_test.cpp src/ngram/ple_reader.cpp)
@@ -2194,6 +2234,8 @@ if(BUILD_TESTING)
     basalt_cpu_test(NAME native_expert_parity_cpu_${_name} COMMAND native_expert_parity --cpu-synthetic ${_pair})
   endforeach()
   basalt_gpu_test(NAME native_expert_parity_q5_1_min COMMAND native_expert_parity --q5_1-min)
+  # Gemma 4's GELU experts, NVFP4 and MXFP8 (the padded down), CPU tier and GPU against a double reference
+  basalt_gpu_test(NAME native_expert_parity_gemma4 COMMAND native_expert_parity --gemma4)
   # the AVX-512 Q8_K activation quantizer bit for bit against ggml's reference
   basalt_cpu_test(NAME native_expert_parity_q8k_quant COMMAND native_expert_parity --q8k-quant)
   # MXFP4 down experts at the deepseek41 geometry: dequantizer, the AVX-2/AVX-512 dots and one native expert
@@ -2218,6 +2260,7 @@ if(BUILD_TESTING)
   add_executable(ple_bf16_parity tests/kernels/ple_bf16_parity.cpp)
   target_include_directories(ple_bf16_parity PRIVATE ${_gpu_include_directories})
   target_link_libraries(ple_bf16_parity PRIVATE model_qwen4exp_kernels kernels core ${_gpu_runtime_target})
+  basalt_embed_manifest(ple_bf16_parity)
   basalt_cpu_test(NAME ple_bf16_parity COMMAND ple_bf16_parity)
   # a synthetic Q5_1 PLE table through PleTable: single reads, the batched issue/collect path and the Direct
   # reader, every element against an independent decode of the logical codes on the d/m grid (host, synthetic)

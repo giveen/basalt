@@ -71,6 +71,11 @@ int main() {
 #else
     expect("ernie55", false);
 #endif
+#ifdef BASALT_MODEL_GEMMA4
+    expect("gemma4", true);
+#else
+    expect("gemma4", false);
+#endif
     check(model::adapter_names().size() == built, "registering twice keeps one adapter per name");
     if (const model::ModelAdapter* ds = model::find_adapter("deepseek41")) {
         model::Started started;
