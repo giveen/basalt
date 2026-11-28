@@ -227,7 +227,9 @@ class Hy4FlashTest(unittest.TestCase):
             gw.add_raw(t.name, t.shape, t.type_name, raw[g0.data_start + t.offset:g0.data_start + t.offset + nb])
         q_gguf = gw.write(self.t / "hy-qby.gguf")
         mmproj = self.t / "mmproj.gguf"
-        mmproj.write_bytes(b"GGUF" + b"\0" * 16 + b"hy_v4_flash" + b"\0" * 100)
+        projector = GGUFWriter()
+        projector.add("clip.projector_type", "hy_v4_flash")
+        projector.write(mmproj)
         convert.convert(self.args(gguf=[str(q_gguf)], mmproj=str(mmproj)))
         m = ModelFile(str(self.t / "out.basalt"))
         meta = json.loads(m.read("meta"))
@@ -244,7 +246,9 @@ class Hy4FlashTest(unittest.TestCase):
                     "dfly_target_kv_layers": [1, 2], "dfly_target_index_layer": [1, 2]})
         (self.hf / "config.json").write_text(json.dumps(cfg))
         mmproj = self.t / "mmproj.gguf"
-        mmproj.write_bytes(b"GGUF" + b"\0" * 16 + b"hy_v4_flash" + b"\0" * 100)
+        projector = GGUFWriter()
+        projector.add("clip.projector_type", "hy_v4_flash")
+        projector.write(mmproj)
         base_path = self.t / "base.basalt"
         convert.convert(self.args(mmproj=str(mmproj), out=str(base_path)))
         dfly = self.t / "dfly.safetensors"
