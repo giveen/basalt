@@ -62,11 +62,11 @@ template <class R> struct RawROf<R, true> { using T = typename R::RawR; };
 template <class R, class = void>
 struct has_value_index_cvt4 : std::false_type {};
 template <class R>
-struct has_value_index_cvt4<R, std::void_t<decltype(R::kValueIndexCvt4)>> : std::true_type {};
+struct has_value_index_cvt4<R, std::void_t<typename R::ValueIndexCvt4>> : std::true_type {};
 template <class R, class = void>
 struct has_scaled_cvt2 : std::false_type {};
 template <class R>
-struct has_scaled_cvt2<R, std::void_t<decltype(R::kScaledCvt2)>> : std::true_type {};
+struct has_scaled_cvt2<R, std::void_t<typename R::ScaledCvt2>> : std::true_type {};
 
 // A lane's values of kScoreKeys keys (4 at lane + 32 j of each key's latent, j < 4, and Rope / 64 pairs of the rest),
 // rows of type R; masked keys give zeros. All row loads are issued before the first use.
