@@ -1188,6 +1188,15 @@ if(Python3_Interpreter_FOUND)
                           --model ${CMAKE_CURRENT_SOURCE_DIR}/models/Hy4-flash-NVFP4.basalt)
   set_tests_properties(hy4flash_prompt_steps_test PROPERTIES TIMEOUT 1800 SKIP_RETURN_CODE 77)
   endif()
+  if(BASALT_MODEL_DEEPSEEK4)
+  # a read that goes back over a reply's tail, and a read stopped as it starts, in the --serve loop
+  basalt_gpu_test(NAME deepseek4_serve_steps_test
+                  COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/models/deepseek4/serve_steps_test.py
+                          --engine $<TARGET_FILE:basalt>
+                          --model ${CMAKE_CURRENT_SOURCE_DIR}/models/DeepSeek-v4-Vision.basalt
+                          --fixtures ${CMAKE_CURRENT_SOURCE_DIR}/data/bench/deepseek4)
+  set_tests_properties(deepseek4_serve_steps_test PROPERTIES TIMEOUT 1800 SKIP_RETURN_CODE 77)
+  endif()
   basalt_cpu_test(NAME community_row_fix_test
                   COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/program/community_row_fix_test.py
                           $<TARGET_FILE:community_row_test> ${CMAKE_CURRENT_SOURCE_DIR})

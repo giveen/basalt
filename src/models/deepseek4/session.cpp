@@ -1681,10 +1681,9 @@ bool Session::prefill_rows(const int32_t* tokens, int total_tokens, int64_t pos,
     std::vector<float> host((size_t) cap * stream_row);
     std::vector<float> embedding;
     for (int offset = 0; offset < total_tokens;) {
-        if (stop && stop()) {
-            err_ = "deepseek4: prompt read was stopped";
-            return false;
-        }
+        // a stopped read ends at a chunk's end (PrefillRequest::stop): the positions read so far are the history, the
+        // tier and the drafter as after any chunk; the engine reads again from a checkpoint or from 0
+        if (stop && stop()) break;
         const int T = std::min(cap, total_tokens - offset);
         const int32_t* chunk_tokens = tokens + offset;
         const size_t state_bytes = (size_t) T * stream_row * sizeof(float);
