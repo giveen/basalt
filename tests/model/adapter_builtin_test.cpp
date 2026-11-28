@@ -2,6 +2,7 @@
 // load error and the flags each model reports as lossy. Linking the models needs the CUDA runtime, so this runs where
 // that is installed; no GPU work.
 #include "basalt/model/adapter.hpp"
+#include "basalt/core/model_file.hpp"
 #include "basalt/model/flags.hpp"
 #include "basalt/models/builtin.hpp"
 #include "basalt/program/options.hpp"
@@ -128,7 +129,7 @@ int main() {
     if (const model::ModelAdapter* d4 = model::find_adapter("deepseek4")) {
         const auto o = d4->make_options();
         check(!d4->finish_flags(*o) && o->spec == 0, "deepseek4 without a pack takes no drafter window");
-        check(std::string(d4->model_name()) == "DeepSeek-V4-Flash-Vision-Exp" && std::string(d4->community_kv()) == "fp8",
+        check(std::string(d4->model_name(core::Json{})) == "DeepSeek-V4-Flash-Vision-Exp" && std::string(d4->community_kv()) == "fp8",
               "deepseek4 names its community row and defaults to fp8 caches");
         std::vector<std::string> words = {"basalt", "--spec-oracle", "oracle.txt"};
         std::vector<char*> argv;

@@ -42,48 +42,6 @@ __device__ float block_sum(float value, float* partial) {
     return sum;
 }
 
-__device__ float block_max(float value, float* partial) {
-#pragma unroll
-    for (int offset = 16; offset > 0; offset >>= 1)
-        value = fmaxf(value, __shfl_xor_sync(0xffffffffu, value, offset));
-    const int lane = threadIdx.x & 31;
-    const int warp = threadIdx.x >> 5;
-    const int warps = blockDim.x / 32;
-    __syncthreads();
-    if (lane == 0) partial[warp] = value;
-    __syncthreads();
-    value = threadIdx.x < warps ? partial[threadIdx.x] : 0.f;
-#pragma unroll
-    for (int offset = 16; offset > 0; offset >>= 1)
-        value = fmaxf(value, __shfl_xor_sync(0xffffffffu, value, offset));
-    if (threadIdx.x == 0) partial[0] = value;
-    __syncthreads();
-    value = partial[0];
-    __syncthreads();
-    return value;
-}
-
-__device__ __forceinline__ float pow2_ceil(float positive) {
-    const uint32_t bits = __float_as_uint(positive);
-    const int exponent = (int) ((bits >> 23) & 0xffu) - 127 + ((bits & 0x7fffffu) != 0u);
-    return __uint_as_float((uint32_t) (exponent + 127) << 23);
-}
-
-__device__ __forceinline__ float fp4_e2m1_rn(float value) {
-    constexpr float levels[8] = {0.f, .5f, 1.f, 1.5f, 2.f, 3.f, 4.f, 6.f};
-    const float magnitude = fabsf(value);
-    int selected = 7;
-#pragma unroll
-    for (int i = 0; i < 7; ++i) {
-        const float midpoint = (levels[i] + levels[i + 1]) * .5f;
-        if (magnitude < midpoint || (magnitude == midpoint && (i & 1) == 0)) {
-            selected = i;
-            break;
-        }
-    }
-    return copysignf(levels[selected], value);
-}
-
 __device__ __forceinline__ void rotate_pair(float& x0, float& x1, float position, float frequency) {
     float sine, cosine;
     sincosf(position * frequency, &sine, &cosine);
@@ -101,7 +59,6 @@ __global__ void indexer_compress_kernel(int n_tokens, const float* kv, const flo
     __shared__ float hadamard_a[D];
     __shared__ float hadamard_b[D];
     __shared__ float partial[32];
-    __shared__ float fp4_scales[D / 32];
     __shared__ int row_index;
     const int c = threadIdx.x;
 

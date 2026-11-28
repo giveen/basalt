@@ -26,26 +26,6 @@ float bf16_rn(float value) {
     return std::bit_cast<float>(bits & 0xffff0000u);
 }
 
-float fp4_rn(float value) {
-    constexpr float levels[8] = {0.f, .5f, 1.f, 1.5f, 2.f, 3.f, 4.f, 6.f};
-    const float magnitude = std::fabs(value);
-    int selected = 7;
-    for (int i = 0; i < 7; ++i) {
-        const float midpoint = (levels[i] + levels[i + 1]) * .5f;
-        if (magnitude < midpoint || (magnitude == midpoint && (i & 1) == 0)) {
-            selected = i;
-            break;
-        }
-    }
-    return std::copysign(levels[selected], value);
-}
-
-float pow2_ceil(float value) {
-    int exponent = std::ilogb(value);
-    if (std::scalbn(1.f, exponent) != value) ++exponent;
-    return std::scalbn(1.f, exponent);
-}
-
 void reference(int n_tokens, const std::vector<float>& kv, const std::vector<float>& score,
                const std::vector<float>& ape, const std::vector<int32_t>& pos, const std::vector<float>& norm,
                const std::vector<float>& freq, std::vector<float>& state_kv, std::vector<float>& state_score,
@@ -102,14 +82,7 @@ void reference(int n_tokens, const std::vector<float>& kv, const std::vector<flo
             values.swap(next);
         }
         for (float& value : values) value = bf16_rn(value * (1.f / std::sqrt((float) D)));
-        for (int group = 0; group < D / 32; ++group) {
-            float amax = 6.f * 0x1p-126f;
-            for (int c = group * 32; c < (group + 1) * 32; ++c) amax = std::max(amax, std::fabs(values[c]));
-            const float scale = pow2_ceil(amax * (1.f / 6.f));
-            for (int c = group * 32; c < (group + 1) * 32; ++c)
-                (void) fp4_rn;   // --kv f32 keeps the unrounded rotated values
-                (void) scale;
-        }
+        // The f32 cache keeps the unrounded rotated values.
         for (int c = 0; c < D; ++c) out[(size_t) (p / Ratio) * D + c] = values[c];
     }
 }

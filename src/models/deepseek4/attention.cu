@@ -36,23 +36,6 @@ __device__ float reduce_sum(float value, float* partial) {
     return partial[0];
 }
 
-__device__ float reduce_max(float value, float* partial) {
-#pragma unroll
-    for (int offset = 16; offset; offset >>= 1) value = fmaxf(value, __shfl_xor_sync(0xffffffffu, value, offset));
-    const int lane = threadIdx.x & 31;
-    const int warp = threadIdx.x >> 5;
-    __syncthreads();
-    if (lane == 0) partial[warp] = value;
-    __syncthreads();
-    if (threadIdx.x < Threads / 32) value = partial[threadIdx.x];
-    else value = 0.f;
-#pragma unroll
-    for (int offset = 16; offset; offset >>= 1) value = fmaxf(value, __shfl_xor_sync(0xffffffffu, value, offset));
-    if (threadIdx.x == 0) partial[0] = value;
-    __syncthreads();
-    return partial[0];
-}
-
 __device__ __forceinline__ float bf16_round(float value) {
     return __bfloat162float(__float2bfloat16_rn(value));
 }

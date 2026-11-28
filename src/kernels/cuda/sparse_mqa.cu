@@ -90,8 +90,8 @@ struct RowFp8 {
     using Scales = const uint8_t*;
     static constexpr int kRowBytes = kSparseMqaDim + kSparseMqaDim / 32;
     static __device__ __forceinline__ Scales scales(const uint8_t* r) { return r + kSparseMqaDim; }
-    static constexpr bool kValueIndexCvt4 = true;
-    static constexpr bool kScaledCvt2 = true;
+    [[maybe_unused]] static constexpr bool kValueIndexCvt4 = true;
+    [[maybe_unused]] static constexpr bool kScaledCvt2 = true;
     static __device__ __forceinline__ Raw4 load4(const uint8_t* r, int i) { return reinterpret_cast<const uint32_t*>(r)[i]; }
     static __device__ __forceinline__ Raw2 load2(const uint8_t* r, int i) { return reinterpret_cast<const uint16_t*>(r)[i]; }
     static __device__ __forceinline__ void cvt4(const Raw4& v, const Scales& s, int c, float k[4]) {
@@ -122,8 +122,8 @@ struct RowFp4 {
     using Scales = const uint8_t*;
     static constexpr int kRowBytes = kSparseMqaDim / 2 + kSparseMqaDim / 16;
     static __device__ __forceinline__ Scales scales(const uint8_t* r) { return r + kSparseMqaDim / 2; }
-    static constexpr bool kValueIndexCvt4 = true;
-    static constexpr bool kScaledCvt2 = true;
+    [[maybe_unused]] static constexpr bool kValueIndexCvt4 = true;
+    [[maybe_unused]] static constexpr bool kScaledCvt2 = true;
     static __device__ __forceinline__ Raw4 load4(const uint8_t* r, int i) { return reinterpret_cast<const uint16_t*>(r)[i]; }
     static __device__ __forceinline__ Raw2 load2(const uint8_t* r, int i) { return r[i]; }
     static __device__ __forceinline__ void cvt4(const Raw4& v, const Scales& s, int c, float k[4]) {

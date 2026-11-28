@@ -51,6 +51,7 @@ class DsmlParser:
         self._args(out, "}")
         out.append(Event("tool_call", call=ToolCall(name=self.call.name, arguments=self.args, id=self.call.id)))
         self.call = None
+        self.calls_seen = True
 
     def _reasoning(self, out: list) -> bool:
         end, calls = self.buf.find(self.thinking_end), self.buf.find(self.calls_start)
@@ -72,13 +73,35 @@ class DsmlParser:
         return False
 
     def _content(self, out: list) -> bool:
-        calls = self.buf.find(self.calls_start)
+        search, calls, pending = 0, -1, -1
+        while True:
+            candidate = self.buf.find(self.calls_start, search)
+            if candidate < 0:
+                break
+            boundary = candidate == 0 or self.buf[:candidate].endswith(self.calls_gap)
+            if boundary:
+                tail = self.buf[candidate + len(self.calls_start):].lstrip()
+                if tail.startswith(self.invoke_start) or tail.startswith(self.calls_end):
+                    calls = candidate
+                    break
+                if not tail or self.invoke_start.startswith(tail) or self.calls_end.startswith(tail):
+                    pending = candidate
+                    break
+            search = candidate + len(self.calls_start)
         if calls >= 0:
-            text = self.buf[:calls].rstrip("\n")
+            text = self.buf[:calls]
+            if text.endswith(self.calls_gap):
+                text = text[:-len(self.calls_gap)]
             if text:
                 out.append(Event("content", text))
             self.buf, self.state = self.buf[calls + len(self.calls_start):], "call"
             return True
+        if pending >= 0:
+            content_end = pending - len(self.calls_gap) if pending and self.buf[:pending].endswith(self.calls_gap) else pending
+            if content_end:
+                out.append(Event("content", self.buf[:content_end]))
+            self.buf = self.buf[content_end:]
+            return False
         keep = frontend.hold_back(self.buf, (self.calls_gap + self.calls_start, self.calls_start))
         if len(self.buf) > keep:
             out.append(Event("content", self.buf[:len(self.buf) - keep]))
@@ -102,7 +125,7 @@ class DsmlParser:
                 return True
             if s and not (self.calls_end.startswith(s) or self.invoke_start.startswith(s) or
                           (s.startswith(self.invoke_start) and ">" not in s)):
-                self.buf, self.state = self.calls_start + self.buf, "content"
+                self.buf, self.state = (self.buf.lstrip("\n") if self.calls_seen else self.calls_start + self.buf), "content"
                 self.sub, self.calls_seen = "between", True
                 out.append(Event("content", self.buf))
                 self.buf = ""
@@ -122,6 +145,23 @@ class DsmlParser:
                     self._args(out, '"')
                 self.buf, self.sub = s[m.end():], "value"
                 return True
+            nested = s.find(self.invoke_start)
+            if nested >= 0:
+                self.buf, self.sub = s[nested:], "between"
+                self.call, self.args = None, {}
+                return True
+            call_end = s.find(self.calls_end)
+            if call_end >= 0:
+                self.buf, self.sub = s[call_end:], "between"
+                self.call, self.args = None, {}
+                return True
+            bad_param = s.find(self.param_start)
+            if bad_param >= 0:
+                end = s.find(self.param_end, bad_param)
+                if end >= 0:
+                    self.buf, self.state, self.sub, self.calls_seen = s[end + len(self.param_end):], "content", "between", True
+                    self.call, self.args = None, {}
+                    return True
             return False
         end = self.buf.find(self.param_end)
         if end >= 0:

@@ -301,7 +301,7 @@ int main() {
         if (table_id_errors || table_max_abs > 2e-6 || table_max_rel > 2e-5) return 1;
 
         bool independent = true;
-        for (const auto [start, count] : {std::pair{0, 1}, {1, 3}, {4, 2}, {6, 2}}) {
+        for (const auto& [start, count] : {std::pair{0, 1}, {1, 3}, {4, 2}, {6, 2}}) {
             const size_t l0 = (size_t) start * kExperts, l1 = (size_t) (start + count) * kExperts;
             const size_t r0 = (size_t) start * kRoutes, r1 = (size_t) (start + count) * kRoutes;
             std::vector<float> ls(logits.begin() + (ptrdiff_t) l0, logits.begin() + (ptrdiff_t) l1);

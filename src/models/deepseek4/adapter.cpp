@@ -56,7 +56,7 @@ public:
     PreTokenizer pretokenizer() const override { return {"joyai-llm", pretok_deepseek4}; }
     program::GpuModes gpu_modes() const override { return {}; }
     int max_slots() const override { return 8; }
-    const char* model_name() const override { return "DeepSeek-V4-Flash-Vision-Exp"; }
+    const char* model_name(const core::Json&) const override { return "DeepSeek-V4-Flash-Vision-Exp"; }
     // The model's own caches run with the --kv format; community rows default to fp8, the shipped configuration.
     const char* community_kv() const override { return "fp8"; }
 

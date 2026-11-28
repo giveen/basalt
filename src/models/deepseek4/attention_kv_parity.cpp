@@ -17,14 +17,6 @@ constexpr int QuantWidth = D - Rope;
 
 float bf16_round(float value) { return (float) __float2bfloat16_rn(value); }
 
-float e4m3_round(float value) { return (float) __nv_fp8_e4m3(value); }
-
-float pow2_ceil(float value) {
-    int exponent = 0;
-    const float fraction = std::frexp(value, &exponent);
-    return std::ldexp(1.f, fraction == 0.5f ? exponent - 1 : exponent);
-}
-
 std::vector<float> reference(const std::vector<float>& projected, const std::vector<float>& norm,
                              const std::vector<int32_t>& positions, const basalt::kernels::MqaRopeTable& rope) {
     std::vector<float> out(projected.size());

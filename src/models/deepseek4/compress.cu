@@ -41,25 +41,6 @@ __device__ float block_sum(float value, float* warp_sums) {
     return sum;
 }
 
-__device__ float block_max(float value, float* warp_maxima) {
-    for (int offset = 16; offset > 0; offset >>= 1)
-        value = fmaxf(value, __shfl_xor_sync(0xffffffffu, value, offset));
-    const int lane = threadIdx.x & 31;
-    const int warp = threadIdx.x >> 5;
-    const int warps = blockDim.x >> 5;
-    __syncthreads();
-    if (lane == 0) warp_maxima[warp] = value;
-    __syncthreads();
-    value = threadIdx.x < warps ? warp_maxima[threadIdx.x] : 0.f;
-    for (int offset = 16; offset > 0; offset >>= 1)
-        value = fmaxf(value, __shfl_xor_sync(0xffffffffu, value, offset));
-    if (threadIdx.x == 0) warp_maxima[0] = value;
-    __syncthreads();
-    value = warp_maxima[0];
-    __syncthreads();
-    return value;
-}
-
 __device__ __forceinline__ void rotate_pair(float& x0, float& x1, float position, float frequency) {
     float sine, cosine;
     sincosf(position * frequency, &sine, &cosine);
@@ -75,7 +56,6 @@ __global__ void compress_kernel(CompressKind kind, int ratio, int n_tokens, cons
                                 int32_t* row_of, int mode, int row_bytes) {
     __shared__ float values[kHeadDim];
     __shared__ float warp_sums[32];
-    __shared__ float fp8_scales[(kHeadDim - kRopeDim) / 64];
     __shared__ int32_t row_index;
     const int c = threadIdx.x;
     const int width = kind == CompressKind::Csa ? 2 * kHeadDim : kHeadDim;
