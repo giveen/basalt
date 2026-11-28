@@ -1,0 +1,35 @@
+{
+  "submitter": "giveen",
+  "date": "2026-11-28",
+  "commit": "23d0d815c2",
+  "preset": "community-1",
+  "model": "Gemma-4-12B",
+  "gpus": [
+    {
+      "name": "RTX 5090",
+      "vram_gib": 32,
+      "power_w": 475,
+      "pcie": "5.0 x16",
+      "h2d_gbps": 48.9
+    }
+  ],
+  "ram_gib": 247,
+  "cpu": "Intel Core Ultra 9 285K, 24 cores",
+  "ram_gbps": 75.1,
+  "os": "Linux",
+  "quant": "FP8",
+  "kv": "fp16",
+  "prefill_16k_tps": 12027.7,
+  "prefill_64k_tps": 6559.4,
+  "decode_tps": 408.5,
+  "decode_conv_tps": 270.2,
+  "decode_struct_tps": 491.8,
+  "decode_prose_tps": 204.9,
+  "accept_conv_pct": 52.4,
+  "accept_struct_pct": 98.8,
+  "accept_prose_pct": 45.3,
+  "draft_len_conv": 4.1,
+  "draft_len_struct": 5.9,
+  "draft_len_prose": 2.6,
+  "engine_args": "--gpu 0 --max-context 65361"
+}
