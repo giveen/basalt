@@ -38,6 +38,11 @@ if(BUILD_TESTING)
   target_link_libraries(ds4_context_policy_test PRIVATE warnings)
   basalt_cpu_test(NAME ds4_context_policy_test COMMAND ds4_context_policy_test)
 
+  add_executable(ds4_history_test src/models/deepseek4/history_test.cpp)
+  target_include_directories(ds4_history_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+  target_link_libraries(ds4_history_test PRIVATE warnings)
+  basalt_cpu_test(NAME ds4_history_test COMMAND ds4_history_test)
+
   add_executable(ds4_router_test src/models/deepseek4/router_test.cpp)
   target_include_directories(ds4_router_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
   target_link_libraries(ds4_router_test PRIVATE warnings)

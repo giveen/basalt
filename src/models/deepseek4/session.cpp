@@ -28,6 +28,7 @@
 #include "basalt/vision/transformer.hpp"
 #include "basalt/models/deepseek4/router.hpp"
 #include "models/deepseek4/dspark.hpp"
+#include "models/deepseek4/history.hpp"
 #include "models/deepseek4/routed_expert.hpp"
 #include "models/deepseek4/prefill_ffn.hpp"
 
@@ -365,9 +366,8 @@ public:
         if (r.pos == 0 && !tokens_.empty() && !reset_sequence()) return {model::Status::Error, "deepseek4: " + err_};
         if (!r.tokens || r.n_tokens < 1 || r.n_tokens > 8 || r.pos < 0)
             return {model::Status::Error, "deepseek4: invalid decode window"};
-        if (r.pos > (int64_t) tokens_.size())
-            return {model::Status::Refused, "deepseek4: decode position is beyond the processed history"};
-        if (r.pos < (int64_t) tokens_.size()) tokens_.resize((size_t) r.pos);
+        if (const std::string why = start_at(r.pos); !why.empty())
+            return {model::Status::Refused, "deepseek4: decode window: " + why};
         if (r.pos + r.n_tokens > model_.context())
             return {model::Status::Refused, "deepseek4: request exceeds the loaded context"};
 
@@ -405,9 +405,9 @@ public:
 
     model::Result prefill_chunk(const model::PrefillRequest& r) override {
         if (r.pos == 0 && !tokens_.empty() && !reset_sequence()) return {model::Status::Error, "deepseek4: " + err_};
-        if (!r.tokens || r.n_tokens < 1 || r.pos != (int64_t) tokens_.size())
-            return {model::Status::Error, "deepseek4: invalid or nonconsecutive prefill chunk (pos=" +
-                    std::to_string(r.pos) + ", history=" + std::to_string(tokens_.size()) + ")"};
+        if (!r.tokens || r.n_tokens < 1) return {model::Status::Error, "deepseek4: empty prefill chunk"};
+        if (const std::string why = start_at(r.pos); !why.empty())
+            return {model::Status::Error, "deepseek4: prefill chunk: " + why};
         if (r.pos + r.n_tokens > model_.context())
             return {model::Status::Refused, "deepseek4: prompt exceeds the loaded context"};
         if (!commit_staged(r.pos)) return {model::Status::Error, err_};
@@ -520,8 +520,9 @@ public:
     model::Result prefill_embeddings(const float* rows, int n_rows, int64_t pos, model::ImageGrid grid) override {
         (void) grid;
         if (pos == 0 && !tokens_.empty() && !reset_sequence()) return {model::Status::Error, "deepseek4: " + err_};
-        if (!rows || n_rows < 1 || pos != (int64_t) tokens_.size())
-            return {model::Status::Error, "deepseek4: invalid or nonconsecutive image rows"};
+        if (!rows || n_rows < 1) return {model::Status::Error, "deepseek4: no image rows"};
+        if (const std::string why = start_at(pos); !why.empty())
+            return {model::Status::Error, "deepseek4: image rows: " + why};
         if (pos + n_rows > model_.context())
             return {model::Status::Refused, "deepseek4: image prompt exceeds the loaded context"};
         last_window_rows_ = 0;
@@ -944,6 +945,14 @@ private:
 
     // A staged verify window whose rows the conversation keeps goes into the drafter's rings before the next window
     // stages its own (the prompt's last rows, when no draft ran between the two).
+    // A step starts at `pos`: a tail the last decode window processed past what the engine kept goes back (start_refusal),
+    // and the step's rows overwrite it. Empty, or why it may not start there.
+    std::string start_at(int64_t pos) {
+        std::string why = start_refusal(pos, (int64_t) tokens_.size());
+        if (why.empty() && pos > 0 && pos < (int64_t) tokens_.size()) tokens_.resize((size_t) pos);
+        return why;
+    }
+
     bool commit_staged(int64_t pos) {
         if (!feat_staged_ || !drafter_ || feat_rows_ <= 0 || feat_pos0_ < 0) return true;
         const int take = (int) std::clamp<int64_t>(pos - feat_pos0_, 0, feat_rows_);
