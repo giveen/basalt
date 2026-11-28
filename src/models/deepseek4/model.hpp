@@ -14,6 +14,9 @@ namespace basalt::models::deepseek4 {
 
 class DsparkDrafter;
 
+/// The most second cards whose expert tiers a start uses (gpu-mode peer takes no more cards than the main card and these).
+constexpr int kMaxSecondCards = 4;
+
 class DsModel final : public model::LoadedModel {
 public:
     ~DsModel() override;
@@ -26,6 +29,8 @@ public:
                        std::vector<std::unique_ptr<model::ModelSession>>& sessions) override;
     model::Result attach(const model::LoadRequest& request,
                          std::vector<std::unique_ptr<model::ModelSession>>& sessions) override;
+    /// gpu-mode peer: the expert tier deals each second card a block of layers' experts.
+    model::PeerHooks* peer() const override { return tier_.get(); }
 
     ModelWeights& weights() { return weights_; }
     const ModelWeights& weights() const { return weights_; }
@@ -36,7 +41,9 @@ public:
     int spec() const { return request_.spec; }
     bool vision_enabled() const { return request_.vision; }
     int diag_rows() const { return request_.diag_rows; }
-    model::Result ensure_tier();
+    /// Opens the expert tier once, during the start. `h_rows`: the session's pinned, portable, mapped expert rows, which
+    /// the CPU pool and each second card write a decode window's rows into.
+    model::Result ensure_tier(float* h_rows);
     model::BatchShared& batch_shared() { return batch_shared_; }
 
 private:
@@ -48,8 +55,6 @@ private:
     std::shared_ptr<core::ExpertTier> tier_;
     mutable basalt::vision::TransformerBlas vision_blas_;
     std::unique_ptr<DsparkDrafter> dspark_;
-    float* h_expert_input_ = nullptr;
-    float* h_expert_rows_ = nullptr;
     int device_ = -1;
     int64_t context_ = 0;
     CacheFormat format_ = CacheFormat::Fp8;

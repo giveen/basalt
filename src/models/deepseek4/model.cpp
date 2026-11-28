@@ -22,21 +22,13 @@ model::Result failure(const std::string& message) {
 DsModel::~DsModel() {
     dspark_.reset();
     tier_.reset();
-    if (h_expert_input_) cudaFreeHost(h_expert_input_);
-    if (h_expert_rows_) cudaFreeHost(h_expert_rows_);
 }
 
-model::Result DsModel::ensure_tier() {
+model::Result DsModel::ensure_tier(float* h_rows) {
     if (tier_) return {};
     if (!planning_) return failure("the expert tier can only be planned during model start");
+    if (!h_rows) return failure("the expert tier needs the session's mapped expert rows");
     const Geometry& g = weights_.geo();
-    constexpr unsigned flags = cudaHostAllocPortable | cudaHostAllocMapped;
-    if (cudaHostAlloc(reinterpret_cast<void**>(&h_expert_input_), (size_t) g.n_embd * sizeof(float), flags) != cudaSuccess ||
-        cudaHostAlloc(reinterpret_cast<void**>(&h_expert_rows_), (size_t) g.n_used * g.n_embd * sizeof(float), flags) != cudaSuccess) {
-        if (h_expert_input_) { cudaFreeHost(h_expert_input_); h_expert_input_ = nullptr; }
-        if (h_expert_rows_) { cudaFreeHost(h_expert_rows_); h_expert_rows_ = nullptr; }
-        return failure("cannot allocate mapped expert staging");
-    }
 
     core::ExpertTierSpec spec;
     std::string err;
@@ -88,7 +80,7 @@ model::Result DsModel::ensure_tier() {
     reserve.copies = copies_keep;
     reserve.beside_homes = short_room;
     reserve.modules = kModuleRoom;
-    if (!tier->open(reserve, h_expert_rows_, *planning_, err)) return failure(err);
+    if (!tier->open(reserve, h_rows, *planning_, err)) return failure(err);
     tier_ = std::move(tier);
     return {};
 }
@@ -97,8 +89,6 @@ model::Result DsModel::plan(const model::LoadRequest& request, core::LoadPlan& r
                             std::vector<std::unique_ptr<model::ModelSession>>& sessions) {
     if (request.paths.size() != 1 || request.paths.front().empty()) return failure("one Basalt pack path is required");
     if (request.sessions != 1) return failure("this initial session path supports one conversation");
-    if (!request.gpus.cards.empty() && request.gpus.cards.size() != 1)
-        return failure("DeepSeek4 currently runs on one GPU");
 
     request_ = request;
     if (!request.kv.empty() && request.kv != "fp8" && request.kv != "fp16")

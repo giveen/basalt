@@ -42,6 +42,7 @@ the shares, and checks the model's modes without loading it.
 | --- | --- | --- | --- |
 | [Qwen3.8-Flash-Next](../models/qwen38-flash-next.md#memory) | up to 4 cards: experts and prompt layers | up to 8 cards | refused |
 | [DeepSeek-V4.1-Flash](../models/deepseek41.md#cards) | up to 5 cards: experts, a block of layers each | refused | refused |
+| [DeepSeek V4 Vision](../models/deepseek4.md#cards) | up to 5 cards: experts, a block of layers each | refused | refused |
 | [Hy4-flash](../models/hy4-flash.md#cards) | up to 4 cards: experts, a block of layers each | refused | refused |
 | [Qwen3.8-27B](../models/qwen38-27b.md#cards) | 2 cards: the last layers of long prompts | 2 cards | refused |
 | [Inkling 2 Mini](../models/inkling2.md#two-cards) | 2 cards: the experts that spill from the main card | 2 cards | refused |
@@ -73,6 +74,7 @@ with `use gpu 0`.
   peer a contiguous block of layers, sized to its room.
 - **Prompt rows.** A peer also computes its experts' share of each prompt chunk: any chunk on a peer as fast as the main card, chunks
   up to 2,559 rows on a slower one (a slower card costs a longer chunk more than the experts it saves the main card's link).
+  DeepSeek V4 Vision instead stages a peer's experts onto the main card with the chunk's other experts, which computes them there.
 - **Prompt layers (Flash-Next, Qwen3.8-27B).** A long fresh part of a prompt is read as a pipeline over the cards while no other
   conversation decodes: the main card reads the first layers of a chunk and hands it on, a peer reads the next layers while the cards
   before it read the next chunks, and the main card reads the last chunk whole. Decode never uses the stage.

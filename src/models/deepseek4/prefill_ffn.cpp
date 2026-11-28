@@ -102,7 +102,8 @@ public:
                   device(shared_up_, (size_t) cap_ * g_.n_ff_exp * sizeof(float)) &&
                   device(shared_hidden_, (size_t) cap_ * g_.n_ff_exp * sizeof(float)) &&
                   device(shared_bounds_, 2 * sizeof(int32_t)) && device(identity_, route_cap_ * sizeof(int32_t)) &&
-                  cudaStreamCreateWithFlags(&copy_, cudaStreamNonBlocking) == cudaSuccess;
+                  cudaStreamCreateWithFlags(&copy_, cudaStreamNonBlocking) == cudaSuccess &&
+                  cudaGetDevice(&main_device_) == cudaSuccess;
         for (int i = 0; i < kAheadSlots && ok; ++i) {
             Stage& s = stage_[i];
             ok = device(s.blobs, stage_stride_ * kGroup) &&
@@ -183,6 +184,8 @@ public:
                 cudaMemcpyAsync(dst, src.dev, (size_t) el.bytes, cudaMemcpyDeviceToDevice, copy_);
             } else if (src.pinned) {
                 cudaMemcpyAsync(dst, src.pinned, (size_t) el.bytes, cudaMemcpyHostToDevice, copy_);
+            } else if (src.peer) {
+                cudaMemcpyPeerAsync(dst, main_device_, src.peer, tier_.peer_for(l)->device(), (size_t) el.bytes, copy_);
             } else {
                 if (!host_synced) {
                     if (cudaEventSynchronize(D.copied) != cudaSuccess) {
@@ -443,6 +446,12 @@ public:
                         err = "deepseek4: cannot stage a pinned prompt expert";
                         return false;
                     }
+                } else if (src.peer) {
+                    if (cudaMemcpyPeerAsync(dev_dst, main_device_, src.peer, tier_.peer_for(layer)->device(), (size_t) el.bytes,
+                                            copy_) != cudaSuccess) {
+                        err = "deepseek4: cannot stage a second card's prompt expert";
+                        return false;
+                    }
                 } else {
                     if (!host_synced) {
                         if (cudaEventSynchronize(B.copied) != cudaSuccess) {
@@ -700,6 +709,7 @@ private:
     bool ahead_active_ = false;
     int64_t issued_ = 0, consumed_ = 0;
     cudaStream_t copy_ = nullptr;
+    int main_device_ = 0;   // the card the products run on; a second card's homes are staged onto it
     uint8_t *xq_ = nullptr, *hq_ = nullptr,
             *shared_xq_ = nullptr, *shared_hq_ = nullptr;
     float *gu_ = nullptr, *h_ = nullptr, *rows_ = nullptr,

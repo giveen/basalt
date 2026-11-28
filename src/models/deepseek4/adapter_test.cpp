@@ -1,4 +1,5 @@
 #include "models/deepseek4/adapter.hpp"
+#include "models/deepseek4/model.hpp"
 
 #include <cstdio>
 #include <string>
@@ -47,8 +48,8 @@ int main() {
         return 1;
     }
     const auto modes = adapter->gpu_modes();
-    if (modes.peer || modes.split || modes.tensor) {
-        std::puts("deepseek4 adapter: unsupported multi-GPU mode was advertised");
+    if (modes.peer != basalt::models::deepseek4::kMaxSecondCards + 1 || modes.split || modes.tensor) {
+        std::puts("deepseek4 adapter: gpu modes are not peer alone");
         return 1;
     }
     std::puts("deepseek4 adapter metadata: ok");

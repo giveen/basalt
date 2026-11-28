@@ -7,7 +7,7 @@ The target pack is the DeepSeek-V4-Flash-Vision-Exp checkpoint derived from V4-F
 uses MXFP4 routed experts and Q8_0 for source FP8 linears, so it is not a BF16 0731 reference.
 
 The converter, pack validation, serving dialect, model-local CUDA primitives, and C++ metadata adapter exist. The adapter
-selects the pack's `joyai-llm` tokenizer, V4 token names, image pad, DSML grammar, and one-GPU mode. The regular
+selects the pack's `joyai-llm` tokenizer, V4 token names, image pad, DSML grammar, and `gpu-mode peer` ([Cards](#cards)). The regular
 `DeepSeek-V4-Flash-Vision-Exp.basalt` fails pack validation because it lacks `hc_head_fn.weight`; the separately generated
 `-hchead.basalt` includes the three checkpoint-sourced head tensors and passes Basalt's pack test and source-GGUF byte
 verification. Keep the original pack unchanged. `ModelWeights` queues dense tensors in the start's `LoadPlan`, widens the
@@ -52,7 +52,22 @@ Conversation checkpoints now snapshot the sliding-window rings and rolling atten
 attention and CSA index rows use the shared positional-cell save/restore path. A two-chunk Wikitext gate exercised save,
 restore, and restarting at position zero. `BatchSession` is registered with the shared batch driver, but V4's host-steered
 expert routing currently selects its sequential fallback; this verifies API identity semantics, not parallel batch speed.
-The single available RTX 5090 leaves multi-GPU peer identity untested.
+
+## Cards
+
+`gpu` names the cards and `gpu-mode` what they do ([GPUs](../configuration/gpus.md)): `"gpu": "0,1", "gpu-mode": "peer"`.
+The model runs `peer` only, on up to five cards; `split` and `tensor` are refused with the modes it runs.
+
+- **Peer:** the shared expert tier gives each card after the main one the second-card homes of a contiguous block of layers,
+  sized to its free memory (or `gpu-share`). In a decode window the peer computes the rows of the experts it holds, and of
+  the misses it fetches over its own link, into the mapped rows the CPU pool writes, with the main card's kernels.
+- **Prompt chunks** stage a peer's experts onto the main card beside the chunk's other experts (through pinned host memory
+  where the cards have no peer access); the main card computes every routed row of a chunk.
+- **Quality:** against one card a peer differs only at CPU-against-GPU expert rounding: the 16,394-token `prefill`
+  fixture and 64 steps fed the one-card picks (`--diag-gpu-check`) gave the same greedy tokens, top-1 100%, mean KLD
+  `0.00119` (worst step `0.0289`).
+- **Memory:** with every expert on a card or in RAM, no prompt pins the file reads' staging, so the RAM the tier was sized
+  beside stays free.
 
 ## Decode pass breakdown
 

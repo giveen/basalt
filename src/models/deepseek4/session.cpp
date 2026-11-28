@@ -255,7 +255,7 @@ public:
                 reset_indexer_compress_state(cache.indexer_state_kv, cache.indexer_state_score, stream_);
             }
         }
-        if (model::Result result = model_.ensure_tier(); !result.ok()) {
+        if (model::Result result = model_.ensure_tier(h_expert_rows_); !result.ok()) {
             err = result.message;
             return false;
         }
@@ -1981,6 +1981,23 @@ bool Session::routed_step(int layer, const float* normalized, int n_tokens, cons
     }
 
     const int n_ids = n_tokens * geo_.n_used;
+    // gpu-mode peer: the second card's share goes out before the routes land; its kernels wait on the card for the plan
+    struct PeerArm {
+        core::PeerExperts* peer = nullptr;
+        ~PeerArm() {   // raised on every way out, so the card never waits for good (a raised share has nothing to do)
+            std::string e;
+            if (peer) peer->raise(0, nullptr, nullptr, e);
+        }
+    } armed;
+    core::PeerExperts* peer = tier->peer_for(layer);   // the card that holds this layer's second-card homes
+    if (peer) {
+        if (!peer->arm(layers_[(size_t) layer].expert_layout, h_expert_input_, n_tokens, geo_.n_used,
+                       core::policy::peer_groups(n_tokens), err_)) {
+            err_ = "deepseek4: " + err_;
+            return false;
+        }
+        armed.peer = peer;
+    }
     tier->pump(layer, 2 + n_tokens);
 
     // The single publish kernel writes ids before advancing the mapped sequence word.
@@ -2018,10 +2035,21 @@ bool Session::routed_step(int layer, const float* normalized, int n_tokens, cons
         return false;
     }
     const int fetched = tier->fetch(layer, lookup, use);
-    bool cpu = false, reading = false;
+    // the second card's plan first: its rows are the last to land; the experts it fetched over its own link are planned
+    // beside the ones it holds
+    if (peer) {
+        int32_t kind[kExpertWindowRoutes]{};
+        for (int r = 0; r < n_ids; ++r) kind[r] = !lookup.peer[uidx[r]] ? 0 : lookup.fetched[uidx[r]] ? 3 : 2;
+        if (!peer->raise(layer, h_expert_ids_, kind, err_)) {
+            err_ = "deepseek4: " + err_;
+            return false;
+        }
+    }
+    bool cpu = false, reading = false, on_peer = false;
     for (int k = 0; k < lookup.k; ++k) {
         cpu = cpu || (!lookup.dev[k] && !lookup.peer[k] && !lookup.reading[k] && !lookup.dropped[k]);
         reading = reading || lookup.reading[k];
+        on_peer = on_peer || lookup.peer[k];
         if (lookup.dropped[k]) {
             for (int j = 0; j < use[k].nt; ++j) {
                 const size_t row = (size_t) use[k].row[j];
@@ -2087,6 +2115,11 @@ bool Session::routed_step(int layer, const float* normalized, int n_tokens, cons
     } else if (fetched) {
         tier->await_fetch(stream_);
     }
+    // the second card's fetched experts run once their copies land, long after these launches
+    if (peer && !peer->run_fetched(err_)) {
+        err_ = "deepseek4: " + err_;
+        return false;
+    }
 
     WindowRowPtrs rp;
     const size_t n_embd = (size_t) geo_.n_embd;
@@ -2105,7 +2138,7 @@ bool Session::routed_step(int layer, const float* normalized, int n_tokens, cons
             }
         }
     } join_guard;
-    if (cpu || reading) {
+    if (cpu || reading || on_peer) {
         join_guard.word = h_join_;
         join_guard.val = ++join_seq_;
         kernels::wait_word(d_join_, join_guard.val, stream_);
@@ -2119,6 +2152,11 @@ bool Session::routed_step(int layer, const float* normalized, int n_tokens, cons
         tier->finish_cpu();
     }
     if (cpu || reading) tier->promote(layer, lookup);
+    // the second card's rows are in the mapped rows before the join word goes up
+    if (peer && !peer->finish(nullptr, err_)) {
+        err_ = "deepseek4: " + err_;
+        return false;
+    }
     tier->mark_gap(stream_);
     return true;
 }
